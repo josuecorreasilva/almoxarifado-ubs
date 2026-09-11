@@ -30,8 +30,13 @@ with aba1:
     ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
     
     col1, col2 = st.columns(2)
+    # Link da planilha do Google
+    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?gid=0&single=true&output=csv"
+    df_materiais = pd.read_csv(url_google_sheets)
+    lista_de_itens = df_materiais["Material"].tolist()
+
     with col1:
-        material = st.selectbox("Material de Enfermagem", ["Álcool 70%", "Seringa 5ml", "Gaze", "Luva M", "Soro Fisiológico"])
+    material = st.selectbox("Material de Enfermagem", lista_de_itens)
     with col2:
         quantidade = st.number_input("Quantidade Necessária", min_value=1, value=10)
     
