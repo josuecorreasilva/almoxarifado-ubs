@@ -36,7 +36,7 @@ with aba1:
     lista_de_itens = df_materiais["Material"].tolist()
 
     with col1:
-    material = st.selectbox("Material de Enfermagem", lista_de_itens)
+        material = st.selectbox("Material de Enfermagem", lista_de_itens)
     with col2:
         quantidade = st.number_input("Quantidade Necessária", min_value=1, value=10)
     
