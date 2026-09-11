@@ -31,7 +31,7 @@ with aba1:
     
     col1, col2 = st.columns(2)
     # Link da planilha do Google
-    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?gid=0&single=true&output=csv"
+    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
     df_materiais = pd.read_csv(url_google_sheets)
     lista_de_itens = df_materiais["Material"].tolist()
 
