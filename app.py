@@ -35,17 +35,40 @@ with aba1:
     df_materiais = pd.read_csv(url_google_sheets)
     lista_de_itens = df_materiais["Material"].tolist()
 
+    # Cria a memória temporária (carrinho) do sistema
+    if 'carrinho' not in st.session_state:
+        st.session_state.carrinho = []
+        
     with col1:
         material = st.selectbox("Material de Enfermagem", lista_de_itens)
     with col2:
         quantidade = st.number_input("Quantidade Necessária", min_value=1, value=10)
-    
-    if st.button("Registrar Pedido no Sistema"):
-        novo_dado = pd.DataFrame([[date.today(), distrito_selecionado, ubs_selecionada, material, quantidade]], 
-                                 columns=["Data", "Distrito", "UBS", "Material", "Quantidade"])
-        novo_dado.to_csv(ARQUIVO_DADOS, mode='a', header=False, index=False)
-        st.success("Pedido registrado! Acesse o Painel Gerencial para ver a atualização.")
-
+        
+    # Botão 1: Apenas guarda o item na memória temporária
+    if st.button("➕ Adicionar Item à Lista"):
+        st.session_state.carrinho.append({
+            "Data": date.today(),
+            "Distrito": distrito_selecionado,
+            "UBS": ubs_selecionada,
+            "Material": material,
+            "Quantidade": quantidade
+        })
+        st.success(f"Adicionado: {quantidade}x {material}")
+        
+    # Se a lista tiver itens, mostra a tabela de resumo e o botão de envio final
+    if len(st.session_state.carrinho) > 0:
+        st.markdown("---")
+        st.write("**🛒 Resumo do Pedido Atual:**")
+        
+        # Gera uma tabela virtual apenas com os itens selecionados agora
+        df_carrinho = pd.DataFrame(st.session_state.carrinho)
+        st.dataframe(df_carrinho, use_container_width=True)
+        
+        # Botão 2: Grava toda a lista de uma vez no banco de dados geral
+        if st.button("✅ Enviar Pedido Completo ao Almoxarifado"):
+            df_carrinho.to_csv(ARQUIVO_DADOS, mode='a', header=False, index=False)
+            st.session_state.carrinho = [] # Esvazia o carrinho para a próxima UBS
+            st.success("Pedido enviado com sucesso! Acesse a aba de Relatórios.")
 with aba2:
     st.subheader("Relatório de Consumo em Tempo Real")
     df_dados = pd.read_csv(ARQUIVO_DADOS)
