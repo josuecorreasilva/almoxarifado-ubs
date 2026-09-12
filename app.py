@@ -18,50 +18,69 @@ distritos_ubs = {
     "Colônia": ["Cascata", "Maciel", "Triunfo", "Grupelli", "Monte Bonito", "Cordeiro de Farias", "Pedreiras", "Vila Nova", "Cerrito Alegre", "Colônia Osório", "Corrientes", "Santa Silvana", "Posto Branco"]
 }
 
-# Criamos um novo arquivo CSV para suportar a nova coluna "Nº do Pedido" sem dar erro no banco antigo
 ARQUIVO_DADOS = 'pedidos_oficiais_v2.csv'
 
+# Atualizamos o banco vazio para incluir a coluna Categoria, caso o arquivo ainda não exista
 if not os.path.exists(ARQUIVO_DADOS):
-    df_vazio = pd.DataFrame(columns=["Nº do Pedido", "Data", "Distrito", "UBS", "Material", "Quantidade"])
+    df_vazio = pd.DataFrame(columns=["Nº do Pedido", "Data", "Distrito", "UBS", "Categoria", "Material", "Quantidade"])
     df_vazio.to_csv(ARQUIVO_DADOS, index=False)
 
 st.title("📦 Sistema de Pedidos - Almoxarifado Central")
 
-aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Relatórios)"])
+aba1, aba2, aba3 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Resumo)", "Filtros e Relatórios Avançados"])
 
 with aba1:
     st.subheader("Formulário da Unidade Básica de Saúde")
-    distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
-    ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
     
-    col1, col2 = st.columns(2)
+    # Organizando o layout dos distritos e unidades
+    col_distrito, col_ubs = st.columns(2)
+    with col_distrito:
+        distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
+    with col_ubs:
+        ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
+        
+    st.markdown("---")
     
     # ATENÇÃO: COLE O SEU LINK DO GOOGLE SHEETS AQUI DENTRO DAS ASPAS
-    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
+    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pubhtml"
     
     try:
         df_materiais = pd.read_csv(url_google_sheets)
-        lista_de_itens = df_materiais["Material"].tolist()
+        # O sistema lê a nova coluna Categoria e remove valores vazios
+        lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
     except:
-        lista_de_itens = ["Erro ao carregar planilha. Verifique o link."]
+        lista_categorias = ["Erro ao carregar planilha"]
+        df_materiais = pd.DataFrame()
         
-    # Sistema de memória (Carrinho)
+    # 1. Filtro principal: O usuário escolhe a Categoria primeiro
+    categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
+    
+    # A lista de materiais é filtrada instantaneamente com base na categoria escolhida
+    if not df_materiais.empty and "Categoria" in df_materiais.columns:
+         df_filtrado = df_materiais[df_materiais["Categoria"] == categoria_selecionada]
+         lista_de_itens = df_filtrado["Material"].dropna().tolist()
+    else:
+         lista_de_itens = ["Erro na leitura"]
+         
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
         
+    # 2 e 3. Escolha do Item e Quantidade
+    col1, col2 = st.columns(2)
     with col1:
-        material = st.selectbox("Material de Enfermagem", lista_de_itens)
+        material = st.selectbox("2. Selecione o Material", lista_de_itens)
     with col2:
-        quantidade = st.number_input("Quantidade Necessária", min_value=1, value=10)
+        quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
     if st.button("➕ Adicionar Item à Lista"):
         st.session_state.carrinho.append({
             "Distrito": distrito_selecionado,
             "UBS": ubs_selecionada,
+            "Categoria": categoria_selecionada, # Registra a categoria no pedido
             "Material": material,
             "Quantidade": quantidade
         })
-        st.success(f"Adicionado: {quantidade}x {material}")
+        st.success(f"Adicionado: {quantidade}x {material} ({categoria_selecionada})")
         
     if len(st.session_state.carrinho) > 0:
         st.markdown("---")
@@ -71,16 +90,13 @@ with aba1:
         st.dataframe(df_carrinho, use_container_width=True)
         
         if st.button("✅ Enviar Pedido Completo ao Almoxarifado"):
-            # Gera um código único para o pedido
             numero_pedido = f"PED-{int(time.time())}"
-            
-            # Formata os dados para salvar no banco
             dados_finais = df_carrinho.copy()
             dados_finais.insert(0, "Data", date.today())
             dados_finais.insert(0, "Nº do Pedido", numero_pedido)
             
             dados_finais.to_csv(ARQUIVO_DADOS, mode='a', header=False, index=False)
-            st.session_state.carrinho = [] # Limpa a tela para a próxima unidade
+            st.session_state.carrinho = []
             st.success(f"Pedido {numero_pedido} enviado com sucesso! Acesse o Painel Gerencial.")
 
 with aba2:
@@ -88,7 +104,6 @@ with aba2:
     df_dados = pd.read_csv(ARQUIVO_DADOS)
     
     if not df_dados.empty:
-        # Agrupa os itens para gerar a tabela de resumo de pedidos
         resumo_pedidos = df_dados.groupby(["Nº do Pedido", "Data", "Distrito", "UBS"]).size().reset_index(name="Total de Itens Diferentes")
         
         st.write("**📋 Lista de Pedidos Realizados (Visão Geral):**")
@@ -97,14 +112,15 @@ with aba2:
         st.markdown("---")
         st.write("**🔍 Detalhar um Pedido Específico:**")
         
-        # Cria a caixa para selecionar e expandir um pedido
         lista_pedidos = resumo_pedidos["Nº do Pedido"].tolist()
         pedido_selecionado = st.selectbox("Selecione o Nº do Pedido para conferir a lista de materiais:", ["Selecione..."] + lista_pedidos)
         
         if pedido_selecionado != "Selecione...":
             detalhes = df_dados[df_dados["Nº do Pedido"] == pedido_selecionado]
             st.write(f"Materiais solicitados no pedido **{pedido_selecionado}**:")
-            st.dataframe(detalhes[["Material", "Quantidade"]], use_container_width=True)
+            # Exibe a categoria também na visão detalhada
+            colunas_exibicao = [col for col in ["Categoria", "Material", "Quantidade"] if col in detalhes.columns]
+            st.dataframe(detalhes[colunas_exibicao], use_container_width=True)
             
         st.markdown("---")
         st.write("**📊 Total de Materiais Solicitados por Distrito:**")
@@ -112,3 +128,58 @@ with aba2:
         st.bar_chart(grafico_dados)
     else:
         st.info("Nenhum pedido registrado ainda.")
+
+with aba3:
+    st.subheader("Filtros Avançados e Geração de Relatórios")
+    df_dados = pd.read_csv(ARQUIVO_DADOS)
+    
+    if not df_dados.empty:
+        # Adicionado um 5º filtro para as categorias
+        filtro1, filtro2, filtro3, filtro4, filtro5 = st.columns(5)
+        
+        with filtro1:
+            distritos_unicos = df_dados["Distrito"].unique().tolist()
+            filtro_distrito = st.multiselect("Distrito", distritos_unicos)
+        with filtro2:
+            ubs_unicas = df_dados["UBS"].unique().tolist()
+            filtro_ubs = st.multiselect("UBS", ubs_unicas)
+        with filtro3:
+            # Previne erros caso a base de relatórios antiga não tenha a coluna categoria
+            if "Categoria" in df_dados.columns:
+                categorias_unicas = df_dados["Categoria"].dropna().unique().tolist()
+            else:
+                categorias_unicas = []
+            filtro_categoria = st.multiselect("Categoria", categorias_unicas)
+        with filtro4:
+            materiais_unicos = df_dados["Material"].unique().tolist()
+            filtro_material = st.multiselect("Material", materiais_unicos)
+        with filtro5:
+            datas_unicas = df_dados["Data"].unique().tolist()
+            filtro_data = st.multiselect("Data", datas_unicas)
+            
+        df_filtrado = df_dados.copy()
+        
+        if filtro_distrito:
+            df_filtrado = df_filtrado[df_filtrado["Distrito"].isin(filtro_distrito)]
+        if filtro_ubs:
+            df_filtrado = df_filtrado[df_filtrado["UBS"].isin(filtro_ubs)]
+        if filtro_categoria and "Categoria" in df_filtrado.columns:
+            df_filtrado = df_filtrado[df_filtrado["Categoria"].isin(filtro_categoria)]
+        if filtro_material:
+            df_filtrado = df_filtrado[df_filtrado["Material"].isin(filtro_material)]
+        if filtro_data:
+            df_filtrado = df_filtrado[df_filtrado["Data"].isin(filtro_data)]
+            
+        st.markdown("---")
+        st.write(f"**Resultado:** {len(df_filtrado)} registros encontrados.")
+        st.dataframe(df_filtrado, use_container_width=True)
+        
+        csv = df_filtrado.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar Relatório",
+            data=csv,
+            file_name='relatorio_pedidos_almoxarifado.csv',
+            mime='text/csv',
+        )
+    else:
+        st.info("O banco de dados ainda está vazio. Os relatórios aparecerão após o primeiro pedido.")
