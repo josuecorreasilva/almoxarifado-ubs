@@ -42,7 +42,7 @@ with aba1:
     st.markdown("---")
     
     # ATENÇÃO: COLE O SEU LINK DO GOOGLE SHEETS AQUI DENTRO DAS ASPAS
-    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pubhtml"
+    url_google_sheets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
     
     try:
         df_materiais = pd.read_csv(url_google_sheets)
