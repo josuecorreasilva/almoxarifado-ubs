@@ -109,12 +109,31 @@ with aba1:
     st.subheader("Formulário da Unidade Básica de Saúde")
     
     col_distrito, col_ubs = st.columns(2)
-    with col_distrito:
-        distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
-    with col_ubs:
-        # Puxa apenas as UBSs que pertencem ao distrito escolhido acima
-        ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
+    
+    # Se for Gestão, as caixas ficam livres para escolher qualquer distrito
+    if st.session_state.perfil == "GESTAO":
+        with col_distrito:
+            distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
+        with col_ubs:
+            ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
+            
+    # Se for UBS, o sistema trava as caixas na unidade exata que veio do banco de dados
+    else:
+        unidade_usuario = st.session_state.ubs_nome # Puxa "Balsa" do Supabase
         
+        # O Python procura automaticamente a qual distrito essa UBS pertence
+        distrito_detectado = "Não Encontrado"
+        for distrito, unidades in distritos_ubs.items():
+            if unidade_usuario in unidades:
+                distrito_detectado = distrito
+                break
+                
+        # Cria as caixas cinzas e bloqueadas (disabled=True)
+        with col_distrito:
+            distrito_selecionado = st.selectbox("Distrito (Acesso Restrito)", [distrito_detectado], disabled=True)
+        with col_ubs:
+            ubs_selecionada = st.selectbox("Unidade (Acesso Restrito)", [unidade_usuario], disabled=True)
+            
     st.markdown("---")
     
     # POR QUE: Tenta (try) ler o Google Sheets. Se a internet do usuário cair (except), o aplicativo não quebra a tela toda.
