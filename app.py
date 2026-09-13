@@ -227,11 +227,17 @@ if len(st.session_state.carrinho) > 0:
 
 
 # --- OBSERVAÇÃO GERAL E ENVIO ---
-observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
+observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial...")
 
 if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
-    if not supabase:
-        st.error("Falha na conexão com Supabase.")
+    # Diagnóstico passo a passo na tela:
+    st.write(f"DEBUG - Itens no carrinho: {len(st.session_state.carrinho)}")
+    st.write(f"DEBUG - Conexão Supabase ativa: {supabase is not None}")
+
+    if not st.session_state.carrinho:
+        st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
+    elif not supabase:
+        st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
     else:
         numero_pedido = f"PED-{int(time.time())}"
         data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -249,6 +255,15 @@ if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
                     "quantidade": item["quantidade"],
                     "observacao": observacao_geral
                 })
+
+            try:
+                # Tenta enviar para o Supabase
+                response = supabase.table("pedidos").insert(lista_insercao).execute()
+                st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
+                st.session_state.carrinho = [] # Limpa o carrinho
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 with aba2:
     st.subheader("Painel de Controle Central")
     
