@@ -54,9 +54,14 @@ if not st.session_state.autenticado:
                 st.session_state.email_usuario = resposta.user.email
                 
                 # Regra que define quem enxerga o que:
-                if "gestao" in st.session_state.email_usuario:
-                    st.session_state.perfil = "GESTAO"
-                    st.session_state.ubs_nome = "Visão Global"
+                if "ubs" in st.session_state.email_usuario:
+    st.session_state.perfil = "UBS"
+    # O comando '.replace("ubs", "")' limpa a sigla para o sistema reconhecer o nome real. 
+    # Ex: 'ubsbalsa' vira 'balsa' e encaixa perfeitamente no filtro.
+    st.session_state.ubs_nome = email_digitado.split('@')[0].replace("ubs", "").capitalize()
+else:
+    st.session_state.perfil = "GESTAO"
+    st.session_state.ubs_nome = "Visão Global"
                 else:
                     st.session_state.perfil = "UBS"
                     st.session_state.ubs_nome = email_digitado.split('@')[0].capitalize()
