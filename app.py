@@ -283,20 +283,20 @@ with aba2:
             else:
                 df_supabase = pd.DataFrame(dados)
                 
-                # ENVOLVEMOS A TABELA GERAL COM A CLASSE QUE BLOQUEIA A IMPRESSÃO
+                pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().reset_index(drop=True)
+                
+                # BLOCO ENVOLVIDO POR UMA TAG HTML COM A CLASSE QUE BLOQUEIA NA IMPRESSÃO
                 st.markdown('<div class="nao-imprimir">', unsafe_allow_html=True)
                 st.write("**Lista de Pedidos Realizados:**")
-                
-                # Exibe a tabela resumo para gerenciamento
-                pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().reset_index(drop=True)
                 st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True) # Fim do bloco oculto na impressão
+                st.markdown('</div>', unsafe_allow_html=True)
                 
                 st.markdown("---")
+                st.markdown('<div class="nao-imprimir">', unsafe_allow_html=True)
                 st.write("### Detalhar e Imprimir Comprovante")
-                
                 lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
                 pedido_selecionado = st.selectbox("Escolha o número do pedido para ver o comprovante oficial:", lista_opcoes)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
                 if pedido_selecionado != "Selecione...":
                     detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
