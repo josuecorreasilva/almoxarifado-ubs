@@ -10,6 +10,19 @@ from supabase import create_client, Client
 # POR QUE: Define como a página vai aparecer na aba do navegador e usa a tela toda (layout wide)
 st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="wide")
 
+st.markdown("""
+    <style>
+    @media print {
+        /* Oculta a barra lateral, cabeçalhos do Streamlit e botões na hora de imprimir */
+        [data-testid="stSidebar"], header, button, .stButton {
+            display: none !important;
+        }
+        body {
+            background-color: white;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
 # POR QUE: Conecta o seu aplicativo ao banco de dados na nuvem (Supabase)
 supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co"
 supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF" 
