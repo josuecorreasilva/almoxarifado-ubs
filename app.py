@@ -49,7 +49,7 @@ col_titulo, col_logo = st.columns([4, 1])
 
 with col_titulo:
     # st.header cria um texto menor do que o st.title original
-    st.header("📦 Sistema de Pedidos - Almoxarifado Central (BD Profissional)")
+    st.header("📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde (BD Profissional)")
 
 with col_logo:
     # A imagem é colocada na segunda coluna, empurrando-a para a direita
