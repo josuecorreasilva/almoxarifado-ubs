@@ -49,7 +49,7 @@ col_titulo, col_logo1, col_logo2 = st.columns([6, 1, 1])
 
 with col_titulo:
     # st.subheader diminui a fonte ainda mais em relação ao st.header
-    st.subheader("📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde (BD Profissional)")
+    st.subheader("📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde     (BD Profissional)")
 
 with col_logo1:
     st.image("horizontalloggoverr.png", width=350)
