@@ -84,7 +84,7 @@ if st.sidebar.button("Sair do Sistema"):
 col_logo1, col_logo2, col_titulo = st.columns([1, 1, 6])
 
 with col_logo1:
-    st.image("logo-governo.png", width=90) # ATENÇÃO: Verifique se o nome exato da imagem no GitHub é este
+    st.image("horizontalloggoverr.png", width=90) # ATENÇÃO: Verifique se o nome exato da imagem no GitHub é este
     
 with col_logo2:
     st.image("brasao-cidade-pelotas-rs.jpg", width=90)
