@@ -424,10 +424,12 @@ with aba2:
                     else:
                         st.write("### 🖨️ Emissão de Relatório Oficial e Parecer Técnico")
                         
-                        col_e1, col_e2 = st.columns(2)
+                        col_e1, col_e2, col_e3 = st.columns(3)
                         with col_e1:
-                            periodo_imp = st.selectbox("Período do Relatório para Impressão", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp_oficial")
+                            tipo_imp_oficial = st.selectbox("Formato do Relatório", ["Consolidado Geral", "Por Categoria"], key="tipo_imp_oficial")
                         with col_e2:
+                            periodo_imp = st.selectbox("Período de Impressão", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp_oficial")
+                        with col_e3:
                             if st.session_state.perfil == "GESTAO":
                                 ubs_imp = st.selectbox("Unidade Referência", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="u_imp_oficial")
                             else:
@@ -446,19 +448,35 @@ with aba2:
                         elif periodo_imp == "Ano Atual":
                             df_imp = df_imp[df_imp['data_dt'].dt.year == agora.year]
 
+                        # Se escolhido por categoria, exibe seletor específico
+                        cat_escolhida_imp = None
+                        if tipo_imp_oficial == "Por Categoria":
+                            if not df_imp.empty:
+                                cat_disponiveis_imp = df_imp["categoria"].unique().tolist()
+                                cat_escolhida_imp = st.selectbox("Selecione a Categoria para o Relatório Oficial", cat_disponiveis_imp, key="cat_oficial_sel")
+                                df_imp = df_imp[df_imp["categoria"] == cat_escolhida_imp]
+
                         st.markdown("---")
                         
                         if df_imp.empty:
-                            st.warning("⚠️ Nenhum registro encontrado para gerar este relatório oficial.")
+                            st.warning("⚠️ Nenhum registro encontrado para gerar este relatório oficial com os filtros selecionados.")
                         else:
-                            df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
-                            df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+                            if tipo_imp_oficial == "Consolidado Geral":
+                                df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                                df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+                                titulo_rel_oficial = "Relatório Oficial Consolidado Geral de Insumos - SisPAC"
+                            else:
+                                df_rel_final = df_imp.groupby(["material"])["quantidade"].sum().reset_index()
+                                df_rel_final.columns = ["Material", "Quantidade Total"]
+                                titulo_rel_oficial = f"Relatório Oficial por Categoria ({cat_escolhida_imp}) - SisPAC"
+
                             df_rel_final = df_rel_final.sort_values(by="Quantidade Total", ascending=False).reset_index(drop=True)
 
+                            # --- DOCUMENTO OFICIAL FORMATADO PARA IMPRESSÃO ---
                             st.markdown(f"""
                             <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
-                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Relatório Oficial Consolidado e Parecer - SisPAC</h4>
+                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{titulo_rel_oficial}</h4>
                                 <hr style="border: 0.5px solid #ccc;">
                                 <p style="margin: 5px 0;"><b>Unidade / Escopo:</b> {ubs_imp}</p>
                                 <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
@@ -467,18 +485,21 @@ with aba2:
                             """, unsafe_allow_html=True)
                             
                             st.markdown("<br>", unsafe_allow_html=True)
-                            st.write("**1. Consolidado Geral de Materiais Requisitados:**")
+                            st.write(f"**1. Relação de Itens Solicitados:**")
                             st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
                             
+                            # --- GERAÇÃO AUTOMÁTICA DO PARECER TÉCNICO ADAPTADO ---
                             total_itens_diferentes = len(df_rel_final)
                             total_geral_pecas = df_rel_final["Quantidade Total"].sum()
                             material_destaque = df_rel_final.iloc[0]["Material"] if not df_rel_final.empty else "N/A"
                             qtd_destaque = df_rel_final.iloc[0]["Quantidade Total"] if not df_rel_final.empty else 0
                             
+                            escopo_texto = f"categoria <b>{cat_escolhida_imp}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
+                            
                             parecer_tecnico = (
-                                f"O presente documento consubstancia o relatório gerencial de requisição de insumos para a unidade "
-                                f"<b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
-                                f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} tipos de materiais distintos</b>. "
+                                f"O presente documento consubstancia o relatório gerencial de requisição de insumos referente ao {escopo_texto} "
+                                f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                                f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
                                 f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
                                 f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques pelo Almoxarifado Central."
                             )
