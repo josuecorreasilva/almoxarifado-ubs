@@ -48,7 +48,6 @@ url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1v
 col_titulo, col_logo1, col_logo2 = st.columns([6, 1, 1])
 
 with col_titulo:
-    with col_titulo:
     # O comando st.markdown com '###' é equivalente ao subheader.
     # O '<br>' força a quebra de linha exatamente onde você deseja.
     st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
