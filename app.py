@@ -201,80 +201,53 @@ if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         "quantidade": quantidade
     })
     st.success(f"Adicionado: {quantidade}x {material}")
-        
-    if st.button("➕ Adicionar Item ao Pedido"):
-        st.session_state.carrinho.append({
-            "distrito": distrito_selecionado, 
-            "ubs": ubs_selecionada,
-            "categoria": categoria_selecionada,
-            "material": material,
-            "quantidade": quantidade,
-            "observacao": observacao # <- Informação nova guardada na memória
-        })
-        st.success(f"Adicionado: {quantidade}x {material}")
-        
-    # --- RESUMO DO CARRINHO ---
-    # Só desenha a tabela e a lixeira se houver itens no carrinho (maior que 0)
-    if len(st.session_state.carrinho) > 0:
-        st.markdown("---")
-        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
-        col_cab1.write("**UBS**")
-        col_cab2.write("**Categoria**")
-        col_cab3.write("**Material**")
-        col_cab4.write("**Qtd**")
-        col_cab5.write("**Excluir**")
-        st.markdown("---")
-        
-        # POR QUE: enumerate gera um número de índice (i) para cada item, usado para saber qual linha a lixeira deve excluir
-        for i, item in enumerate(st.session_state.carrinho):
-            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
-            c1.write(item["ubs"])
-            c2.write(item["categoria"])
-            c3.write(item["material"])
-            c4.write(item["quantidade"])
-            
-            if c5.button("🗑️", key=f"excluir_{i}"):
-                st.session_state.carrinho.pop(i) # pop = remove o item exato da memória
-                st.rerun() # Atualiza a tela para a lixeira funcionar instantaneamente
-        
-        # --- ENVIO PARA O BANCO DE DADOS ---
-       # Caixa de Observação Geral do Pedido logo acima do botão
-    observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
 
-    if st.button("✅ Enviar Pedido Completo"):
-        if not supabase:
-            st.error("Falha na conexão com Supabase.")
-        else:
-            # POR QUE: time.time() gera um número em milissegundos, garantindo que nenhum pedido terá o mesmo código
-            numero_pedido = f"PED-{int(time.time())}"
-            data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# --- RESUMO DO CARRINHO ---
+if len(st.session_state.carrinho) > 0:
+    st.markdown("---")
+    col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
+    col_cab1.write("**UBS**")
+    col_cab2.write("**Categoria**")
+    col_cab3.write("**Material**")
+    col_cab4.write("**Qtd**")
+    col_cab5.write("**Excluir**")
+    st.markdown("---")
+    
+    for i, item in enumerate(st.session_state.carrinho):
+        c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
+        c1.write(item["ubs"])
+        c2.write(item["categoria"])
+        c3.write(item["material"])
+        c4.write(item["quantidade"])
+        
+        # Chave única melhorada com o nome do material para evitar qualquer conflito
+        if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
+            st.session_state.carrinho.pop(i)
+            st.rerun()
 
-            with st.spinner('Salvando pedido no servidor...'):
-                # Pega tudo que está no carrinho e transforma em uma estrutura pronta para o banco de dados
-                lista_insercao = []
-                for item in st.session_state.carrinho:
-                    lista_insercao.append({
-                        "numero_pedido": numero_pedido,
-                        "data": data_pedido,
-                        "distrito": item["distrito"],
-                        "ubs": item["ubs"],
-                        "categoria": item["categoria"],
-                        "material": item["material"],
-                        "quantidade": item["quantidade"],
-                        "observacao": observacao_geral  # Salva a observação geral digitada pela UBS
-                    })
+# --- OBSERVAÇÃO GERAL E ENVIO ---
+observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
 
-                    try:
-                        response = supabase.table("pedidos").insert(lista_insercao).execute()
-                        if not response.data:
-                            st.error("Falha ao salvar dados (resposta vazia).")
-                        else:
-                            st.success(f"Pedido {numero_pedido} salvo com sucesso!")
-                            st.session_state.carrinho = [] # O pedido deu certo, então esvaziamos o carrinho
-                    except Exception as e:
-                        st.error(f"Erro na gravação Supabase: {e}")
+if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
+    if not supabase:
+        st.error("Falha na conexão com Supabase.")
+    else:
+        numero_pedido = f"PED-{int(time.time())}"
+        data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# --- ABA 2: PAINEL GERENCIAL ---
+        with st.spinner('Salvando pedido no servidor...'):
+            lista_insercao = []
+            for item in st.session_state.carrinho:
+                lista_insercao.append({
+                    "numero_pedido": numero_pedido,
+                    "data": data_pedido,
+                    "distrito": item["distrito"],
+                    "ubs": item["ubs"],
+                    "categoria": item["categoria"],
+                    "material": item["material"],
+                    "quantidade": item["quantidade"],
+                    "observacao": observacao_geral
+                })
 with aba2:
     st.subheader("Painel de Controle Central")
     
