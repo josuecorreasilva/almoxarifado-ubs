@@ -112,7 +112,7 @@ with aba1:
     
     # POR QUE: Tenta (try) ler o Google Sheets. Se a internet do usuário cair (except), o aplicativo não quebra a tela toda.
     try:
-        df_materiais = pd.read_csv(url_google_sheets_materiais)
+        df_materiais = pd.read_csv(url_google_sheets_materiais = https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv)
         lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
     except:
         st.error("Erro ao carregar materiais. Verifique o link do Google Sheets no início do código.")
