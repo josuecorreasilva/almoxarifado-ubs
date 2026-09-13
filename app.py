@@ -13,7 +13,7 @@ st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="w
 st.markdown("""
     <style>
     @media print {
-        /* Oculta a barra lateral, cabeçalhos, botões e a tabela do painel geral na impressão */
+        /* Oculta a barra lateral, cabeçalhos do Streamlit, botões e elementos marcados na hora de imprimir */
         [data-testid="stSidebar"], header, button, .stButton, .nao-imprimir {
             display: none !important;
         }
@@ -24,19 +24,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-    <style>
-    @media print {
-        /* Oculta a barra lateral, cabeçalhos do Streamlit e botões na hora de imprimir */
-        [data-testid="stSidebar"], header, button, .stButton {
-            display: none !important;
-        }
-        body {
-            background-color: white;
-        }
-    }
-    </style>
-""", unsafe_allow_html=True)
 # POR QUE: Conecta o seu aplicativo ao banco de dados na nuvem (Supabase)
 supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co"
 supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF" 
@@ -55,7 +42,6 @@ distritos_ubs = {
 }
 
 # POR QUE: Link para puxar a lista de materiais ao vivo do seu Google Sheets. 
-# IMPORTANTE: Cole o seu link real aqui entre as aspas (aquele terminado em output=csv)!
 url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
 
 # ==========================================
@@ -118,7 +104,7 @@ if st.sidebar.button("Sair do Sistema"):
 col_logo1, col_logo2, col_titulo = st.columns([1, 1, 6])
 
 with col_logo1:
-    st.image("horizontalloggoverr.png", width=90) # ATENÇÃO: Verifique se o nome exato da imagem no GitHub é este
+    st.image("horizontalloggoverr.png", width=90) 
     
 with col_logo2:
     st.image("brasao-cidade-pelotas-rs.jpg", width=90)
@@ -146,16 +132,14 @@ with aba1:
             
     # Se for UBS, o sistema trava as caixas na unidade exata que veio do banco de dados
     else:
-        unidade_usuario = st.session_state.ubs_nome # Puxa "Balsa" do Supabase
+        unidade_usuario = st.session_state.ubs_nome 
         
-        # O Python procura automaticamente a qual distrito essa UBS pertence
         distrito_detectado = "Não Encontrado"
         for distrito, unidades in distritos_ubs.items():
             if unidade_usuario in unidades:
                 distrito_detectado = distrito
                 break
                 
-        # Cria as caixas cinzas e bloqueadas (disabled=True)
         with col_distrito:
             distrito_selecionado = st.selectbox("Distrito (Acesso Restrito)", [distrito_detectado], disabled=True)
         with col_ubs:
@@ -163,7 +147,7 @@ with aba1:
             
     st.markdown("---")
     
-    # POR QUE: Tenta (try) ler o Google Sheets. Se a internet do usuário cair (except), o aplicativo não quebra a tela toda.
+    # POR QUE: Tenta (try) ler o Google Sheets. Se a internet cair, o aplicativo não quebra a tela toda.
     try:
         df_materiais = pd.read_csv(url_google_sheets_materiais)
         lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
@@ -174,7 +158,7 @@ with aba1:
         
     categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
     
-    # Lógica que cruza os dados do Sheets para listar apenas materiais da categoria que você acabou de clicar
+    # Lógica que cruza os dados do Sheets para listar apenas materiais da categoria selecionada
     if not df_materiais.empty and "Categoria" in df_materiais.columns:
          df_filtrado = df_materiais[df_materiais["Categoria"] == categoria_selecionada]
          lista_de_itens = df_filtrado["Material"].dropna().tolist()
@@ -186,89 +170,85 @@ with aba1:
         st.session_state.carrinho = []
         
     # 3. Adição de Itens
-col1, col2 = st.columns(2)
-with col1:
-    material = st.selectbox("2. Selecione o Material", lista_de_itens)
-with col2:
-    quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
-    
-if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
-    st.session_state.carrinho.append({
-        "distrito": distrito_selecionado, 
-        "ubs": ubs_selecionada,
-        "categoria": categoria_selecionada,
-        "material": material,
-        "quantidade": quantidade
-    })
-    st.success(f"Adicionado: {quantidade}x {material}")
-
-# --- RESUMO DO CARRINHO ---
-if len(st.session_state.carrinho) > 0:
-    st.markdown("---")
-    col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
-    col_cab1.write("**UBS**")
-    col_cab2.write("**Categoria**")
-    col_cab3.write("**Material**")
-    col_cab4.write("**Qtd**")
-    col_cab5.write("**Excluir**")
-    st.markdown("---")
-    
-    for i, item in enumerate(st.session_state.carrinho):
-        c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
-        c1.write(item["ubs"])
-        c2.write(item["categoria"])
-        c3.write(item["material"])
-        c4.write(item["quantidade"])
+    col1, col2 = st.columns(2)
+    with col1:
+        material = st.selectbox("2. Selecione o Material", lista_de_itens)
+    with col2:
+        quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-        # Chave única melhorada com o nome do material para evitar qualquer conflito
-        if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
-            st.session_state.carrinho.pop(i)
-            st.rerun()
+    if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
+        st.session_state.carrinho.append({
+            "distrito": distrito_selecionado, 
+            "ubs": ubs_selecionada,
+            "categoria": categoria_selecionada,
+            "material": material,
+            "quantidade": quantidade
+        })
+        st.success(f"Adicionado: {quantidade}x {material}")
 
-
-# --- OBSERVAÇÃO GERAL E ENVIO ---
-observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial...")
-
-if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
-    # Diagnóstico passo a passo na tela:
-    st.write(f"DEBUG - Itens no carrinho: {len(st.session_state.carrinho)}")
-    st.write(f"DEBUG - Conexão Supabase ativa: {supabase is not None}")
-
-    if not st.session_state.carrinho:
-        st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
-    elif not supabase:
-        st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
-    else:
-        numero_pedido = f"PED-{int(time.time())}"
-        data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        with st.spinner('Salvando pedido no servidor...'):
-            lista_insercao = []
-            for item in st.session_state.carrinho:
-                lista_insercao.append({
-                    "numero_pedido": numero_pedido,
-                    "data": data_pedido,
-                    "distrito": item["distrito"],
-                    "ubs": item["ubs"],
-                    "categoria": item["categoria"],
-                    "material": item["material"],
-                    "quantidade": item["quantidade"],
-                    "observacao": observacao_geral
-                })
-
-            try:
-                # Tenta enviar para o Supabase
-                response = supabase.table("pedidos").insert(lista_insercao).execute()
-                st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
-                st.session_state.carrinho = [] # Limpa o carrinho
+    # --- RESUMO DO CARRINHO ---
+    if len(st.session_state.carrinho) > 0:
+        st.markdown("---")
+        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
+        col_cab1.write("**UBS**")
+        col_cab2.write("**Categoria**")
+        col_cab3.write("**Material**")
+        col_cab4.write("**Qtd**")
+        col_cab5.write("**Excluir**")
+        st.markdown("---")
+        
+        for i, item in enumerate(st.session_state.carrinho):
+            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
+            c1.write(item["ubs"])
+            c2.write(item["categoria"])
+            c3.write(item["material"])
+            c4.write(item["quantidade"])
+            
+            # Chave única para exclusão linha por linha sem perder o estado da página
+            if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
+                st.session_state.carrinho.pop(i)
                 st.rerun()
-            except Exception as e:
-                st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
+
+    st.markdown("---")
+    
+    # --- OBSERVAÇÃO GERAL E ENVIO ---
+    observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
+
+    if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
+        if not st.session_state.carrinho:
+            st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
+        elif not supabase:
+            st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
+        else:
+            numero_pedido = f"PED-{int(time.time())}"
+            data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with st.spinner('Salvando pedido no servidor...'):
+                lista_insercao = []
+                for item in st.session_state.carrinho:
+                    lista_insercao.append({
+                        "numero_pedido": numero_pedido,
+                        "data": data_pedido,
+                        "distrito": item["distrito"],
+                        "ubs": item["ubs"],
+                        "categoria": item["categoria"],
+                        "material": item["material"],
+                        "quantidade": item["quantidade"],
+                        "observacao": observacao_geral
+                    })
+
+                try:
+                    # Grava no Supabase e valida o retorno
+                    response = supabase.table("pedidos").insert(lista_insercao).execute()
+                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
+                    st.session_state.carrinho = [] # Limpa o carrinho perfeitamente após o envio
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
+
+# --- ABA 2: PAINEL GERENCIAL ---
 with aba2:
     st.subheader("Painel de Controle Central")
-    
-    if not supabase:
-        st.error("Banco de dados desconectado.")
     
     if not supabase:
         st.error("Banco de dados desconectado.")
