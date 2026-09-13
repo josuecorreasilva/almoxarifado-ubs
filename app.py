@@ -290,7 +290,7 @@ with aba2:
                 # Exibe a tabela resumo para gerenciamento
                 pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().reset_index(drop=True)
                 st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True, _html_escaped=True) # Fim do bloco oculto na impressão
+                st.markdown('</div>', unsafe_allow_html=True) # Fim do bloco oculto na impressão
                 
                 st.markdown("---")
                 st.write("### Detalhar e Imprimir Comprovante")
