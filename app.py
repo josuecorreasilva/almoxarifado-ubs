@@ -255,7 +255,7 @@ with aba1:
                 except Exception as e:
                     st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 
-# --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS ---
+# --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
     st.subheader("📊 Painel de Controle e Relatórios")
     
@@ -271,10 +271,10 @@ with aba2:
             else:
                 df_supabase = pd.DataFrame(dados)
                 
-                # Converte a coluna de data para o formato de data/hora do Pandas para facilitar filtros de período
+                # Converte a coluna de data para o formato de data/hora do Pandas
                 df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
                 
-                # REQUISIÇÃO DE SEGURANÇA: Se o perfil for UBS, filtra estritamente para mostrar apenas os dados dela
+                # SEGURANÇA: Se o perfil for UBS, restringe estritamente aos pedidos dela
                 if st.session_state.perfil == "UBS":
                     df_supabase = df_supabase[df_supabase['ubs'].str.lower() == st.session_state.ubs_nome.lower()]
                     st.info(f"Visualizando dados exclusivos da unidade: **{st.session_state.ubs_nome}**")
@@ -285,14 +285,14 @@ with aba2:
                     # Sub-navegação interna na Aba 2
                     modo_aba2 = st.radio(
                         "Escolha a visualização:", 
-                        ["📋 Acompanhar Pedidos e Comprovantes", "📈 Gerar Relatórios Analíticos"],
+                        ["📋 Acompanhar Pedidos e Comprovantes", "📈 Relatórios Analíticos e Gráficos", "🖨️ Emitir Relatório Oficial (Imprimir)"],
                         horizontal=True
                     )
                     
                     st.markdown("---")
                     
                     # ==========================================
-                    # VISÃO 1: ACOMPANHAR PEDIDOS E IMPRIMIR COMPROVANTE
+                    # VISÃO 1: ACOMPANHAR PEDIDOS E COMPROVANTES
                     # ==========================================
                     if modo_aba2 == "📋 Acompanhar Pedidos e Comprovantes":
                         pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
@@ -350,21 +350,17 @@ with aba2:
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     # ==========================================
-                    # VISÃO 2: GERADOR DE RELATÓRIOS (GERAL OU POR CATEGORIA)
+                    # VISÃO 2: RELATÓRIOS ANALÍTICOS COM GRÁFICOS
                     # ==========================================
-                    else:
-                        st.write("### 📈 Configuração do Relatório")
+                    elif modo_aba2 == "📈 Relatórios Analíticos e Gráficos":
+                        st.write("### 📈 Painel Analítico e Gráficos de Consumo")
                         
                         col_r1, col_r2, col_r3 = st.columns(3)
-                        
                         with col_r1:
                             tipo_relatorio = st.selectbox("Tipo de Relatório", ["Geral (Consolidado)", "Por Categoria"])
-                        
                         with col_r2:
                             periodo = st.selectbox("Período", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"])
-                        
                         with col_r3:
-                            # Se for Gestão, pode escolher entre todas ou uma UBS específica. Se for UBS, fixa nela mesma.
                             if st.session_state.perfil == "GESTAO":
                                 lista_ubs_filtro = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
                                 ubs_escolhida = st.selectbox("Filtrar Unidade", lista_ubs_filtro)
@@ -372,21 +368,16 @@ with aba2:
                                 ubs_escolhida = st.session_state.ubs_nome
                                 st.text_input("Filtrar Unidade", value=ubs_escolhida, disabled=True)
 
-                        # --- APLICAÇÃO DOS FILTROS DE DATA E UBS ---
+                        # Filtros
                         df_rel = df_supabase.copy()
-                        
-                        # Filtro de UBS para Gestão
                         if st.session_state.perfil == "GESTAO" and ubs_escolhida != "Todas as UBS":
                             df_rel = df_rel[df_rel['ubs'] == ubs_escolhida]
                             
-                        # Filtro de Período baseado na data atual (2026)
                         agora = pd.Timestamp.now()
                         if periodo == "Última Semana (7 dias)":
-                            limite = agora - pd.Timedelta(days=7)
-                            df_rel = df_rel[df_rel['data_dt'] >= limite]
+                            df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=7))]
                         elif periodo == "Último Mês (30 dias)":
-                            limite = agora - pd.Timedelta(days=30)
-                            df_rel = df_rel[df_rel['data_dt'] >= limite]
+                            df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=30))]
                         elif periodo == "Ano Atual":
                             df_rel = df_rel[df_rel['data_dt'].dt.year == agora.year]
 
@@ -396,16 +387,21 @@ with aba2:
                             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
                         else:
                             if tipo_relatorio == "Geral (Consolidado)":
-                                st.write(f"**Relatório Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
+                                st.write(f"**Consolidado Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
                                 df_consolidado = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
                                 df_consolidado.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
+                                
                                 st.dataframe(df_consolidado, use_container_width=True, hide_index=True)
                                 
-                                # Botão de exportação
+                                # Gráfico em barras nativo do Streamlit agrupado por material
+                                st.markdown("#### 📊 Gráfico de Consumo por Material")
+                                df_grafico = df_consolidado.set_index("Material")["Quantidade Total Solicitada"]
+                                st.bar_chart(df_grafico)
+                                
                                 csv = df_consolidado.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório em CSV", data=csv, file_name="relatorio_geral_materiais.csv", mime="text/csv")
                                 
-                            else: # Por Categoria
+                            else:
                                 cat_disponiveis = df_rel["categoria"].unique().tolist()
                                 cat_escolhida = st.selectbox("Selecione a Categoria Desejada", cat_disponiveis)
                                 
@@ -413,12 +409,80 @@ with aba2:
                                 df_cat_cons = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
                                 df_cat_cons.columns = ["Material", "Quantidade Total Solicitada"]
                                 
-                                st.write(f"**Relatório da Categoria: {cat_escolhida} | Unidade(s): {ubs_escolhida}**")
+                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Unidade(s): {ubs_escolhida}**")
                                 st.dataframe(df_cat_cons, use_container_width=True, hide_index=True)
                                 
-                                # Botão de exportação
+                                # Gráfico em barras para a categoria
+                                st.markdown(f"#### 📊 Gráfico de Consumo - {cat_escolhida}")
+                                df_grafico_cat = df_cat_cons.set_index("Material")["Quantidade Total Solicitada"]
+                                st.bar_chart(df_grafico_cat)
+                                
                                 csv = df_cat_cons.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv")
+
+                    # ==========================================
+                    # VISÃO 3: EMITIR RELATÓRIO OFICIAL (PRONTO PARA IMPRESSÃO)
+                    # ==========================================
+                    else:
+                        st.write("### 🖨️ Emissão de Relatório Oficial Consolidado")
+                        
+                        col_e1, col_e2 = st.columns(2)
+                        with col_e1:
+                            periodo_imp = st.selectbox("Período do Relatório para Impressão", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp")
+                        with col_e2:
+                            if st.session_state.perfil == "GESTAO":
+                                ubs_imp = st.selectbox("Unidade Referência", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="u_imp")
+                            else:
+                                ubs_imp = st.session_state.ubs_nome
+                                st.text_input("Unidade Referência", value=ubs_imp, disabled=True, key="u_imp_lock")
+
+                        # Filtro de impressão
+                        df_imp = df_supabase.copy()
+                        if st.session_state.perfil == "GESTAO" and ubs_imp != "Todas as UBS":
+                            df_imp = df_imp[df_imp['ubs'] == ubs_imp]
+                            
+                        agora = pd.Timestamp.now()
+                        if periodo_imp == "Última Semana (7 dias)":
+                            df_imp = df_imp[df_imp['data_dt'] >= (agora - pd.Timedelta(days=7))]
+                        elif periodo_imp == "Último Mês (30 dias)":
+                            df_imp = df_imp[df_imp['data_dt'] >= (agora - pd.Timedelta(days=30))]
+                        elif periodo_imp == "Ano Atual":
+                            df_imp = df_imp[df_imp['data_dt'].dt.year == agora.year]
+
+                        st.markdown("---")
+                        
+                        if df_imp.empty:
+                            st.warning("⚠️ Nenhum registro encontrado para gerar este relatório oficial.")
+                        else:
+                            df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                            df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+
+                            # BLOCO DO DOCUMENTO OFICIAL FORMATADO PARA IMPRESSÃO
+                            st.markdown(f"""
+                            <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
+                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
+                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Relatório Oficial Consolidado de Insumos - SisPAC</h4>
+                                <hr style="border: 0.5px solid #ccc;">
+                                <p style="margin: 5px 0;"><b>Unidade / Escopo:</b> {ubs_imp}</p>
+                                <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
+                                <p style="margin: 5px 0;"><b>Data de Emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.write("**Consolidado Geral de Materiais Requisitados:**")
+                            
+                            # Exibição limpa em tabela para impressão
+                            st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
+                            
+                            st.markdown("<br><br>", unsafe_allow_html=True)
+                            st.markdown("____________________________________________________")
+                            st.markdown("Assinatura e Carimbo do Responsável / Gestão")
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                            if st.button("🖨️ Imprimir ou Salvar Relatório em PDF", key="btn_print_rel"):
+                                st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
+                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
                                 
         except Exception as e:
-            st.error(f"Erro ao carregar dados do painel: {e}")
+            st.error(f"Erro ao carregar painel e relatórios: {e}")
