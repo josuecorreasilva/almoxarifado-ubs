@@ -72,16 +72,6 @@ if st.sidebar.button("Sair do Sistema"):
 # ==========================================
 col_logo1, col_logo2, col_titulo = st.columns([1, 1, 6])
 
-with col_logo1:
-    st.image("brasao-cidade-pelotas-rs.jpg", width=90)
-
-with col_logo2:
-    st.image("horizontalloggoverr.png", width=90)
-
-with col_titulo:
-    st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
-
-
 # DAQUI PARA BAIXO, MANTENHA O SEU CÓDIGO ORIGINAL DAS ABAS (aba1, aba2 = st.tabs...)
 with col_logo1:
     st.image("horizontalloggoverr.png", width=350)
