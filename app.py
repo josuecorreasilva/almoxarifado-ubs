@@ -29,7 +29,7 @@ distritos_ubs = {
 
 # POR QUE: Link para puxar a lista de materiais ao vivo do seu Google Sheets. 
 # IMPORTANTE: Cole o seu link real aqui entre as aspas (aquele terminado em output=csv)!
-url_google_sheets_materiais = "COLE_AQUI_O_SEU_LINK_DO_GOOGLE_SHEETS_CSV"
+url_google_sheets_materiais = ""https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv""
 
 # ==========================================
 # 3. SISTEMA DE LOGIN E SEGURANÇA
@@ -112,7 +112,7 @@ with aba1:
     
     # POR QUE: Tenta (try) ler o Google Sheets. Se a internet do usuário cair (except), o aplicativo não quebra a tela toda.
     try:
-        df_materiais = pd.read_csv(url_google_sheets_materiais = https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv)
+        df_materiais = pd.read_csv(url_google_sheets_materiais)
         lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
     except:
         st.error("Erro ao carregar materiais. Verifique o link do Google Sheets no início do código.")
