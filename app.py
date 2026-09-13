@@ -13,6 +13,20 @@ st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="w
 st.markdown("""
     <style>
     @media print {
+        /* Oculta a barra lateral, cabeçalhos, botões e a tabela do painel geral na impressão */
+        [data-testid="stSidebar"], header, button, .stButton, .nao-imprimir {
+            display: none !important;
+        }
+        body {
+            background-color: white;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+    <style>
+    @media print {
         /* Oculta a barra lateral, cabeçalhos do Streamlit e botões na hora de imprimir */
         [data-testid="stSidebar"], header, button, .stButton {
             display: none !important;
@@ -217,28 +231,31 @@ with aba1:
                 st.rerun() # Atualiza a tela para a lixeira funcionar instantaneamente
         
         # --- ENVIO PARA O BANCO DE DADOS ---
-        if st.button("✅ Enviar Pedido Completo"):
-            if not supabase:
-                st.error("Falha na conexão com Supabase.")
-            else:
-                # POR QUE: time.time() gera um número em milissegundos, garantindo que nenhum pedido terá o mesmo código
-                numero_pedido = f"PED-{int(time.time())}"
-                data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+       # Caixa de Observação Geral do Pedido logo acima do botão
+    observacao_geral = st.text_area("📝 Observações Gerais / Pontuais do Pedido (Opcional)", placeholder="Ex: Entregar com urgência na parte da manhã...")
 
-                with st.spinner('Salvando pedido no servidor...'):
-                    # Pega tudo que está no carrinho e transforma em uma estrutura pronta para o banco de dados
-                    lista_insercao = []
-                    for item in st.session_state.carrinho:
-                        lista_insercao.append({
-                            "numero_pedido": numero_pedido,
-                            "data": data_pedido, 
-                            "distrito": item["distrito"],
-                            "ubs": item["ubs"],
-                            "categoria": item["categoria"],
-                            "material": item["material"],
-                            "quantidade": item["quantidade"],
-                            "observacao": item["observacao"]
-                        })
+    if st.button("✅ Enviar Pedido Completo"):
+        if not supabase:
+            st.error("Falha na conexão com Supabase.")
+        else:
+            # POR QUE: time.time() gera um número em milissegundos, garantindo que nenhum pedido terá o mesmo código
+            numero_pedido = f"PED-{int(time.time())}"
+            data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with st.spinner('Salvando pedido no servidor...'):
+                # Pega tudo que está no carrinho e transforma em uma estrutura pronta para o banco de dados
+                lista_insercao = []
+                for item in st.session_state.carrinho:
+                    lista_insercao.append({
+                        "numero_pedido": numero_pedido,
+                        "data": data_pedido,
+                        "distrito": item["distrito"],
+                        "ubs": item["ubs"],
+                        "categoria": item["categoria"],
+                        "material": item["material"],
+                        "quantidade": item["quantidade"],
+                        "observacao": observacao_geral  # Salva a observação geral digitada pela UBS
+                    })
 
                     try:
                         response = supabase.table("pedidos").insert(lista_insercao).execute()
