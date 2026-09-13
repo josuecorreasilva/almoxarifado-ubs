@@ -53,21 +53,15 @@ if not st.session_state.autenticado:
                 st.session_state.autenticado = True
                 st.session_state.email_usuario = resposta.user.email
                 
-                # Regra que define quem enxerga o que:
-                if "ubs" in st.session_state.email_usuario:
+       # Regra que define quem enxerga o que:
+if "ubs" in st.session_state.email_usuario:
     st.session_state.perfil = "UBS"
-    # O comando '.replace("ubs", "")' limpa a sigla para o sistema reconhecer o nome real. 
-    # Ex: 'ubsbalsa' vira 'balsa' e encaixa perfeitamente no filtro.
     st.session_state.ubs_nome = email_digitado.split('@')[0].replace("ubs", "").capitalize()
 else:
     st.session_state.perfil = "GESTAO"
     st.session_state.ubs_nome = "Visão Global"
-                else:
-                    st.session_state.perfil = "UBS"
-                    st.session_state.ubs_nome = email_digitado.split('@')[0].capitalize()
-                st.rerun() # Recarrega a tela para liberar o acesso ao painel
-            except Exception as e:
-                st.error("Credenciais inválidas.")
+
+st.rerun() # Recarrega a tela para liberar o acesso ao painel
                 
     # POR QUE: Se o código chega nesta linha e a pessoa não está autenticada, ele PARA a leitura. Nada abaixo existe.
     st.stop() 
