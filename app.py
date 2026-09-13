@@ -52,11 +52,11 @@ with col_titulo:
     st.subheader("📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde (BD Profissional)")
 
 with col_logo1:
-    st.image("brasao-cidade-pelotas-rs.jpg", width=90) # Diminuí um pouco a largura para caberem dois
+    st.image("horizontalloggoverr.png", width=350)
 
 with col_logo2:
     # IMPORTANTE: Coloque o nome exato da nova imagem que você fará upload no GitHub
-    st.image("horizontalloggoverr.png", width=350)
+    st.image("brasao-cidade-pelotas-rs.jpg", width=90) # Diminuí um pouco a largura para caberem dois
 
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Pedidos Salvos)"])
 
