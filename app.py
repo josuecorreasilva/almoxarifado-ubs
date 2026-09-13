@@ -203,7 +203,7 @@ if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
     st.success(f"Adicionado: {quantidade}x {material}")
         
     # Nova caixa de observação logo abaixo da quantidade
-    observacao = st.text_input("4. Observação geral (Opcional)", placeholder="Liste as observações referentes etc.")
+    observacao = st.text_input("4. Observação geral (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
         
     if st.button("➕ Adicionar Item ao Pedido"):
         st.session_state.carrinho.append({
