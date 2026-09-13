@@ -158,20 +158,24 @@ with aba1:
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
         
+    # 3. Adição de Itens
     col1, col2 = st.columns(2)
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
     with col2:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-    if st.button("➕ Adicionar Item"):
-        # POR QUE: O .append() "empurra" essas informações selecionadas para dentro do carrinho de memória
+    # Nova caixa de observação logo abaixo da quantidade
+    observacao = st.text_input("4. Observação do Item (Opcional)", placeholder="Ex: Tamanho M, Marca específica, etc.")
+        
+    if st.button("➕ Adicionar Item ao Pedido"):
         st.session_state.carrinho.append({
             "distrito": distrito_selecionado, 
             "ubs": ubs_selecionada,
             "categoria": categoria_selecionada,
             "material": material,
-            "quantidade": quantidade
+            "quantidade": quantidade,
+            "observacao": observacao # <- Informação nova guardada na memória
         })
         st.success(f"Adicionado: {quantidade}x {material}")
         
@@ -219,7 +223,8 @@ with aba1:
                             "ubs": item["ubs"],
                             "categoria": item["categoria"],
                             "material": item["material"],
-                            "quantidade": item["quantidade"]
+                            "quantidade": item["quantidade"],
+                            "observacao": item["observacao"]
                         })
 
                     try:
