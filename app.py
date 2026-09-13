@@ -29,7 +29,7 @@ distritos_ubs = {
 
 # POR QUE: Link para puxar a lista de materiais ao vivo do seu Google Sheets. 
 # IMPORTANTE: Cole o seu link real aqui entre as aspas (aquele terminado em output=csv)!
-url_google_sheets_materiais = ""https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv""
+url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
 
 # ==========================================
 # 3. SISTEMA DE LOGIN E SEGURANÇA
