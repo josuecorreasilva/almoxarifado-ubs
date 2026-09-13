@@ -52,7 +52,7 @@ with col_logo1:
     
 with col_logo2:
     # IMPORTANTE: Coloque o nome exato da nova imagem que você fará upload no GitHub
-    st.image("brasao-cidade-pelotas-rs.jpg", width=90 # Diminuí um pouco a largura para caberem dois
+    st.image("brasao-cidade-pelotas-rs.jpg", width=90) # Diminuí um pouco a largura para caberem dois
 
 with col_titulo:
     # O comando st.markdown com '###' é equivalente ao subheader.
