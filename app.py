@@ -269,8 +269,6 @@ with aba2:
     
     if not supabase:
         st.error("Banco de dados desconectado.")
-with aba2:
-    st.subheader("Painel de Controle Central")
     
     if not supabase:
         st.error("Banco de dados desconectado.")
