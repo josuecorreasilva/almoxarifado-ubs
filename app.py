@@ -192,7 +192,7 @@ with col1:
 with col2:
     quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
     
-if st.button("➕ Adicionar Item ao Pedido"):
+if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
     st.session_state.carrinho.append({
         "distrito": distrito_selecionado, 
         "ubs": ubs_selecionada,
