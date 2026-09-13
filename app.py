@@ -76,7 +76,7 @@ with col_logo1:
     st.image("brasao-cidade-pelotas-rs.jpg", width=90)
 
 with col_logo2:
-    st.image("horizontallogogoverr.png", width=90)
+    st.image("horizontalloggoverr.png", width=90)
 
 with col_titulo:
     st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
