@@ -212,7 +212,12 @@ with aba1:
     st.markdown("---")
     
     # --- OBSERVAÇÃO GERAL E ENVIO ---
-    observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
+    # Adicionamos uma key para controlar o estado do campo de texto
+    observacao_geral = st.text_area(
+        "📝 Observações Gerais (Opcional)", 
+        placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...",
+        key="input_observacao_geral"
+    )
 
     if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
         if not st.session_state.carrinho:
@@ -238,10 +243,14 @@ with aba1:
                     })
 
                 try:
-                    # Grava no Supabase e valida o retorno
+                    # Grava no Supabase
                     response = supabase.table("pedidos").insert(lista_insercao).execute()
                     st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
-                    st.session_state.carrinho = [] # Limpa o carrinho perfeitamente após o envio
+                    
+                    # SEGURANÇA: Limpa o carrinho e reseta a caixa de observação geral automaticamente
+                    st.session_state.carrinho = []
+                    st.session_state["input_observacao_geral"] = ""
+                    
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
