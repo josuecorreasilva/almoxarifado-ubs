@@ -302,17 +302,7 @@ with aba2:
                     
                     obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                    # Cria o bloco HTML interno da observação caso ela exista
-                    bloco_obs = ""
-                    if obs_geral.strip():
-                        bloco_obs = f"""
-                        <div style="margin-top: 15px; padding: 10px; border: 1px solid #d35400; background-color: #fdfaf6; border-radius: 5px;">
-                            <span style="color: #d35400; font-weight: bold;">📌 Observações Gerais do Pedido:</span><br>
-                            <span style="color: #333; font-size: 14px;">{obs_geral}</span>
-                        </div>
-                        """
-
-                    # COMPROVANTE OFICIAL COM A OBSERVAÇÃO EMBUTIDA NA CAIXA PRINCIPAL
+                    # 1. CAIXA PRINCIPAL DO CABEÇALHO DO COMPROVANTE
                     st.markdown(f"""
                     <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
                         <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
@@ -322,9 +312,17 @@ with aba2:
                         <p style="margin: 5px 0;"><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
                         <p style="margin: 5px 0;"><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
                         <p style="margin: 5px 0;"><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
-                        {bloco_obs}
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    # 2. CAIXA DE OBSERVAÇÃO GERAL (RENDERIZADA SEPARADAMENTE COM SEGURANÇA)
+                    if obs_geral.strip():
+                        st.markdown(f"""
+                        <div style="margin-top: 10px; padding: 12px; border: 1px solid #d35400; background-color: #fdfaf6; border-radius: 5px;">
+                            <span style="color: #d35400; font-weight: bold;">📌 Observações Gerais do Pedido:</span><br>
+                            <span style="color: #333; font-size: 14px;">{obs_geral}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
 
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
