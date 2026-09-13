@@ -47,17 +47,17 @@ url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1v
 # Ajuste as proporções das colunas: Título (largo), Logo 1 (estreito), Logo 2 (estreito)
 col_titulo, col_logo1, col_logo2 = st.columns([6, 1, 1])
 
-with col_titulo:
-    # O comando st.markdown com '###' é equivalente ao subheader.
-    # O '<br>' força a quebra de linha exatamente onde você deseja.
-    st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
-
 with col_logo1:
     st.image("horizontalloggoverr.png", width=350)
 
 with col_logo2:
     # IMPORTANTE: Coloque o nome exato da nova imagem que você fará upload no GitHub
     st.image("brasao-cidade-pelotas-rs.jpg", width=90) # Diminuí um pouco a largura para caberem dois
+
+with col_titulo:
+    # O comando st.markdown com '###' é equivalente ao subheader.
+    # O '<br>' força a quebra de linha exatamente onde você deseja.
+    st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
 
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Pedidos Salvos)"])
 
