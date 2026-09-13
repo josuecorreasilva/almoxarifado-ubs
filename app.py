@@ -56,7 +56,7 @@ with col_logo1:
 
 with col_logo2:
     # IMPORTANTE: Coloque o nome exato da nova imagem que você fará upload no GitHub
-    st.image("horizontalloggoverr.png", width=200)
+    st.image("horizontalloggoverr.png", width=250)
 
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Pedidos Salvos)"])
 
