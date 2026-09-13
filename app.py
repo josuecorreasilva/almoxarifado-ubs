@@ -1,52 +1,88 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import time
-# Bibliotecas novas para conexão profissional
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Almoxarifado Saúde (Profissional)", layout="wide")
+# Configuração da Página
+st.set_page_config(page_title="Almoxarifado Saúde (Profissional)", page_icon="🏥", layout="wide")
 
-# ==============================================================================
-# CONFIGURAÇÃO DO BANCO DE DADOS PROFISSIONAL (SUPABASE)
-# ==============================================================================
-# ATENÇÃO ARQUITETO DE SOLUÇÕES:
-# Cole o seu URL e a chave Anon AQUI, dentro das aspas, direto no GitHub.
-# NÃO cole essas informações no chat com a IA.
+# ==========================================
+# 1. CONEXÃO COM O BANCO DE DADOS
+# ==========================================
 supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co"
-supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF"
+# COLOQUE A SUA CHAVE GIGANTE DE VOLTA AQUI EMBAIXO:
+supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF" 
+supabase = create_client(supabase_url, supabase_key)
 
-# Inicializa o cliente Supabase se as credenciais estiverem preenchidas
-supabase: Client = None
-if supabase_url != "SEU_URL_AQUI" and supabase_key != "SUA_CHAVE_ANON_AQUI":
-    try:
-        supabase = create_client(supabase_url, supabase_key)
-    except Exception as e:
-        st.error(f"Erro crítico ao conectar ao banco de dados Supabase: {e}")
-else:
-    st.error("⚠️ Credenciais do banco de dados profissional (Supabase) não configuradas corretamente no código. O sistema não gravará os pedidos permanentemente e você perderá dados históricos. Configure as chaves no código do GitHub imediatamente.")
+# ==========================================
+# 2. MEMÓRIA DE SESSÃO DO SISTEMA
+# ==========================================
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
 
-# ==============================================================================
-# CONFIGURAÇÃO DOS DADOS FIXOS (PELOTAS) E MATERIAIS
-# ==============================================================================
-# Lista completa de distritos e unidades de Pelotas (Mantenha igual)
-distritos_ubs = {
-    "Centro/Porto": ["Balsa", "Porto", "Cruzeiro", "Navegantes - UBAI", "Fátima", "Osório", "Sansca"],
-    "Areal": ["Areal I", "Areal Leste", "CSU", "Obelisco", "Leocadia", "Bom Jesus", "Dunas"],
-    "Praias": ["Laranjal", "Barro Duro", "Z3"],
-    "Três Vendas I": ["Santa Terezinha", "Py Crespo", "Lindóia", "Sítio Floresta", "Vila Princesa", "União de Bairros", "Jardim de Allah"],
-    "Três Vendas II": ["Cohab Pestano", "CAIC Pestano", "Getúlio Vargas", "Sanga Funda", "Arco-íris", "Vila Municipal", "Salgado Filho", "Saúde Prisional"],
-    "Fragata I": ["Simões Lopes", "Dom Pedro", "Fraget", "Guabiroba"],
-    "Fragata II": ["Fragata", "Cohab Fragata", "Virgílio Costa"],
-    "Colônia": ["Cascata", "Maciel", "Triunfo", "Grupelli", "Monte Bonito", "Cordeiro de Farias", "Pedreiras", "Vila Nova", "Cerrito Alegre", "Colônia Osório", "Corrientes", "Santa Silvana", "Posto Branco"]
-}
+# ==========================================
+# 3. TELA DE LOGIN PROFISSIONAL (Supabase Auth)
+# ==========================================
+if not st.session_state.autenticado:
+    caixa_login = st.container()
+    with caixa_login:
+        st.subheader("🔒 Acesso Restrito - Diretoria de Atenção Primária")
+        
+        email_digitado = st.text_input("E-mail da Unidade / Gestão").lower().strip()
+        senha_digitada = st.text_input("Senha", type="password")
+        
+        if st.button("Entrar no Sistema"):
+            try:
+                # O Python envia os dados para o cofre do Supabase validar
+                resposta = supabase.auth.sign_in_with_password({
+                    "email": email_digitado,
+                    "password": senha_digitada
+                })
+                
+                # Se a senha estiver correta, o sistema libera o acesso
+                st.session_state.autenticado = True
+                st.session_state.email_usuario = resposta.user.email
+                
+                # Define se é a visão global (Gestão) ou visão restrita (UBS)
+                if "gestao" in st.session_state.email_usuario:
+                    st.session_state.perfil = "GESTAO"
+                    st.session_state.ubs_nome = "Visão Global"
+                else:
+                    st.session_state.perfil = "UBS"
+                    st.session_state.ubs_nome = email_digitado.split('@')[0].capitalize()
+                
+                st.rerun() # Atualiza a tela
+                
+            except Exception as e:
+                st.error("Credenciais inválidas. Verifique o e-mail e a senha.")
+                
+    st.stop() # Bloqueio de segurança: nada abaixo desta linha é lido sem login.
 
-# Link da Planilha do Google Sheets para Carregamento da Lista de Materiais
-# MANTENHA O SEU LINK AQUI (aquele que termina em ?output=csv)
-url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
-# Ajuste as proporções das colunas: Título (largo), Logo 1 (estreito), Logo 2 (estreito)
-col_titulo, col_logo1, col_logo2 = st.columns([6, 1, 1])
+# ==========================================
+# 4. BOTÃO DE SAIR (Barra Lateral)
+# ==========================================
+st.sidebar.write(f"👤 Acesso: **{st.session_state.email_usuario}**")
+st.sidebar.write(f"🏥 Perfil: {st.session_state.perfil}")
+if st.sidebar.button("Sair do Sistema"):
+    supabase.auth.sign_out() # Encerra a sessão no servidor
+    st.session_state.autenticado = False
+    st.rerun()
 
+# ==========================================
+# 5. INÍCIO DO APLICATIVO (Logos e Título)
+# ==========================================
+col_logo1, col_logo2, col_titulo = st.columns([1, 1, 6])
+
+with col_logo1:
+    st.image("brasao-cidade-pelotas-rs.jpg", width=90)
+
+with col_logo2:
+    st.image("logo-governo.png", width=90)
+
+with col_titulo:
+    st.markdown("### 📦 Sistema de Pedidos - Almoxarifado Central - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
+
+
+# DAQUI PARA BAIXO, MANTENHA O SEU CÓDIGO ORIGINAL DAS ABAS (aba1, aba2 = st.tabs...)
 with col_logo1:
     st.image("horizontalloggoverr.png", width=350)
     
