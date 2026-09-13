@@ -57,7 +57,7 @@ with col_logo2:
 with col_titulo:
     # O comando st.markdown com '###' é equivalente ao subheader.
     # O '<br>' força a quebra de linha exatamente onde você deseja.
-    st.markdown("### 📦 SisPAC (Sistema de Pedidos - Almoxarifado Central) - Secretaria Municipal de Saúde<br>*(BD Profissional)*", unsafe_allow_html=True)
+    st.markdown("### 📦 SisPAC (Sistema de Pedidos - Almoxarifado Central) - Secretaria Municipal de Saúde.<br>*(BD Profissional)*", unsafe_allow_html=True)
 
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Pedidos Salvos)"])
 
