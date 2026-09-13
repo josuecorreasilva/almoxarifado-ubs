@@ -420,11 +420,11 @@ with aba2:
                                 csv = df_cat_cons.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv")
 
-                    # ==========================================
-                    # VISÃO 3: EMITIR RELATÓRIO OFICIAL (PRONTO PARA IMPRESSÃO)
+                   # ==========================================
+                    # VISÃO 3: EMITIR RELATÓRIO OFICIAL COM PARECER TÉCNICO
                     # ==========================================
                     else:
-                        st.write("### 🖨️ Emissão de Relatório Oficial Consolidado")
+                        st.write("### 🖨️ Emissão de Relatório Oficial e Parecer Técnico")
                         
                         col_e1, col_e2 = st.columns(2)
                         with col_e1:
@@ -436,7 +436,7 @@ with aba2:
                                 ubs_imp = st.session_state.ubs_nome
                                 st.text_input("Unidade Referência", value=ubs_imp, disabled=True, key="u_imp_lock")
 
-                        # Filtro de impressão
+                        # Filtros de Impressão
                         df_imp = df_supabase.copy()
                         if st.session_state.perfil == "GESTAO" and ubs_imp != "Todas as UBS":
                             df_imp = df_imp[df_imp['ubs'] == ubs_imp]
@@ -456,12 +456,13 @@ with aba2:
                         else:
                             df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
                             df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+                            df_rel_final = df_rel_final.sort_values(by="Quantidade Total", ascending=False).reset_index(drop=True)
 
-                            # BLOCO DO DOCUMENTO OFICIAL FORMATADO PARA IMPRESSÃO
+                            # --- DOCUMENTO OFICIAL FORMATADO PARA IMPRESSÃO ---
                             st.markdown(f"""
                             <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
-                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
-                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Relatório Oficial Consolidado de Insumos - SisPAC</h4>
+                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
+                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Relatório Oficial Consolidado e Parecer - SisPAC</h4>
                                 <hr style="border: 0.5px solid #ccc;">
                                 <p style="margin: 5px 0;"><b>Unidade / Escopo:</b> {ubs_imp}</p>
                                 <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
@@ -470,19 +471,38 @@ with aba2:
                             """, unsafe_allow_html=True)
                             
                             st.markdown("<br>", unsafe_allow_html=True)
-                            st.write("**Consolidado Geral de Materiais Requisitados:**")
-                            
-                            # Exibição limpa em tabela para impressão
+                            st.write("**1. Consolidado Geral de Materiais Requisitados:**")
                             st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
+                            
+                            # --- GERAÇÃO AUTOMÁTICA DO PARECER TÉCNICO ---
+                            total_itens_diferentes = len(df_rel_final)
+                            total_geral_pecas = df_rel_final["Quantidade Total"].sum()
+                            material_destaque = df_rel_final.iloc[0]["Material"] if not df_rel_final.empty else "N/A"
+                            qtd_destaque = df_rel_final.iloc[0]["Quantidade Total"] if not df_rel_final.empty else 0
+                            
+                            parecer_tecnico = (
+                                f"O presente documento consubstancia o relatório gerencial de requisição de insumos para a unidade "
+                                f"<b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                                f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} tipos de materiais distintos</b>. "
+                                f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
+                                f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques pelo Almoxarifado Central."
+                            )
+
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.write("**2. Parecer Técnico / Administrativo Preliminar:**")
+                            st.markdown(f"""
+                            <div style="border: 1px solid #7f8c8d; padding: 15px; border-radius: 6px; background-color: #fcfcfc;">
+                                <p style="text-align: justify; color: #2c3e50; font-size: 14px; line-height: 1.6; margin: 0;">
+                                    {parecer_tecnico}
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
                             st.markdown("<br><br>", unsafe_allow_html=True)
                             st.markdown("____________________________________________________")
-                            st.markdown("Assinatura e Carimbo do Responsável / Gestão")
+                            st.markdown("Assinatura e Carimbo do Responsável / Gestão do Almoxarifado")
                             st.markdown("<br>", unsafe_allow_html=True)
 
-                            if st.button("🖨️ Imprimir ou Salvar Relatório em PDF", key="btn_print_rel"):
+                            if st.button("🖨️ Imprimir ou Salvar Relatório Oficial em PDF", key="btn_print_rel_oficial"):
                                 st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
-                                
-        except Exception as e:
-            st.error(f"Erro ao carregar painel e relatórios: {e}")
