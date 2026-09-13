@@ -239,7 +239,7 @@ with aba1:
                         "categoria": item["categoria"],
                         "material": item["material"],
                         "quantidade": item["quantidade"],
-                        "observacao": observacao_geral,
+                        "observacao": texto_observacao,
                         "status": "Pedido enviado"
                     })
 
