@@ -266,12 +266,48 @@ with aba2:
                 lista_pedidos_drop = resumo_pedidos["numero_pedido"].unique().tolist()
                 pedido_selecionado = st.selectbox("Detalhar Pedido:", ["Selecione..."] + lista_pedidos_drop)
                 
-                # Se a pessoa escolher um pedido na caixa de seleção, o sistema filtra a tabela original
+               # Se a pessoa escolher um pedido na caixa de seleção, o sistema exibe a folha de impressão
                 if pedido_selecionado != "Selecione...":
                     detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
-                    colunas_mostra = [c for c in ["categoria", "material", "quantidade"] if c in detalhes.columns]
-                    st.dataframe(detalhes[colunas_mostra].rename(columns={"categoria":"Categoria", "material":"Material", "quantidade":"Qtd"}), use_container_width=True)
-            else:
-                st.warning("Colunas não encontradas no banco de dados.")
-        else:
-            st.info("Nenhum pedido histórico registrado.")
+                    
+                    st.markdown("---")
+                    
+                    # 📄 CABEÇALHO DO DOCUMENTO OFICIAL PARA O ALMOXARIFADO
+                    st.markdown(f"""
+                    <div style="border: 2px solid #ccc; padding: 20px; border-radius: 10px; background-color: #fafafa;">
+                        <h3 style="text-align: center; color: #333;">📦 SECRETARIA MUNICIPAL DE SAÚDE</h3>
+                        <h4 style="text-align: center; color: #666; margin-bottom: 20px;">Comprovante de Requisição de Materiais - SisPAC</h4>
+                        <hr>
+                        <p><b>Nº do Pedido:</b> {pedido_selecionado}</p>
+                        <p><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
+                        <p><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
+                        <p><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.write("**Relação de Itens Solicitados:**")
+                    
+                    # Tabela detalhada incluindo a nova coluna de observação
+                    colunas_mostra = [c for c in ["categoria", "material", "quantidade", "observacao"] if c in detalhes.columns]
+                    df_detalhes_exib = detalhes[colunas_mostra].rename(columns={
+                        "categoria": "Categoria", 
+                        "material": "Material", 
+                        "quantidade": "Qtd", 
+                        "observacao": "Observação"
+                    })
+                    st.dataframe(df_detalhes_exib, use_container_width=True)
+                    
+                    st.markdown("<br><br>", unsafe_allow_html=True)
+                    st.markdown("____________________________________________________")
+                    st.markdown("Assinatura do Responsável / Recebimento no Almoxarifado Central")
+                    st.markdown("<br>", unsafe_allow_html=True)
+
+                    # Botão que aciona a impressão do navegador
+                    if st.button("🖨️ Imprimir ou Salvar Pedido em PDF"):
+                        st.info("💡 **Dica:** Na janela de impressão que vai abrir, altere a impressora destino para **'Salvar como PDF'** caso queira guardar o arquivo digitalmente.")
+                        st.components.v1.html("""
+                            <script>
+                                window.parent.print();
+                            </script>
+                        """, height=0)
