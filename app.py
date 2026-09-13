@@ -48,23 +48,31 @@ if not st.session_state.autenticado:
         
         if st.button("Entrar no Sistema"):
             try:
-                # O Python confere a criptografia no cofre do Supabase
-                resposta = supabase.auth.sign_in_with_password({"email": email_digitado, "password": senha_digitada})
+                # O Python envia os dados para o cofre do Supabase validar
+                resposta = supabase.auth.sign_in_with_password({
+                    "email": email_digitado,
+                    "password": senha_digitada
+                })
+                
+                # Se a senha estiver correta, salva os dados básicos
                 st.session_state.autenticado = True
                 st.session_state.email_usuario = resposta.user.email
                 
-       # Regra que define quem enxerga o que:
-if "ubs" in st.session_state.email_usuario:
-    st.session_state.perfil = "UBS"
-    st.session_state.ubs_nome = email_digitado.split('@')[0].replace("ubs", "").capitalize()
-else:
-    st.session_state.perfil = "GESTAO"
-    st.session_state.ubs_nome = "Visão Global"
-
-st.rerun() # Recarrega a tela para liberar o acesso ao painel
+                # Regra que define quem enxerga o que:
+                if "ubs" in st.session_state.email_usuario:
+                    st.session_state.perfil = "UBS"
+                    nome_limpo = email_digitado.split('@')[0].replace("ubs", "").replace("_", "").replace(".", "")
+                    st.session_state.ubs_nome = nome_limpo.capitalize()
+                else:
+                    st.session_state.perfil = "GESTAO"
+                    st.session_state.ubs_nome = "Visão Global"
                 
-    # POR QUE: Se o código chega nesta linha e a pessoa não está autenticada, ele PARA a leitura. Nada abaixo existe.
-    st.stop() 
+                st.rerun() # Atualiza a tela para liberar o sistema
+                
+            except Exception as e:
+                st.error("Credenciais inválidas. Verifique o e-mail e a senha.")
+                
+    st.stop() # Bloqueio de segurança 
 
 # ==========================================
 # 4. BARRA LATERAL (MENU DE USUÁRIO)
