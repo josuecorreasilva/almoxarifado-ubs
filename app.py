@@ -225,6 +225,7 @@ if len(st.session_state.carrinho) > 0:
             st.session_state.carrinho.pop(i)
             st.rerun()
 
+
 # --- OBSERVAÇÃO GERAL E ENVIO ---
 observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
 
@@ -248,6 +249,11 @@ if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
                     "quantidade": item["quantidade"],
                     "observacao": observacao_geral
                 })
+with aba2:
+    st.subheader("Painel de Controle Central")
+    
+    if not supabase:
+        st.error("Banco de dados desconectado.")
 with aba2:
     st.subheader("Painel de Controle Central")
     
