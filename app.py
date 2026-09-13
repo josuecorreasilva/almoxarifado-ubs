@@ -104,10 +104,27 @@ with aba1:
     if len(st.session_state.carrinho) > 0:
         st.markdown("---")
         st.write("**🛒 Resumo do Pedido Atual:**")
-        df_carrinho = pd.DataFrame(st.session_state.carrinho)
-        # Ajusta nomes de colunas apenas para exibição amigável na tela
-        df_exib_carrinho = df_carrinho.rename(columns={"distrito":"Distrito", "ubs":"UBS", "categoria":"Categoria", "material":"Material", "quantidade":"Quantidade"})
-        st.dataframe(df_exib_carrinho, use_container_width=True)
+       # 1. Cria o cabeçalho da nossa tabela interativa
+        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
+        col_cab1.write("**UBS**")
+        col_cab2.write("**Categoria**")
+        col_cab3.write("**Material**")
+        col_cab4.write("**Qtd**")
+        col_cab5.write("**Excluir**")
+        
+        st.markdown("---")
+        
+        # 2. Lista cada item do carrinho com o botão da lixeira ao lado
+        for i, item in enumerate(st.session_state.carrinho):
+            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
+            c1.write(item["ubs"])
+            c2.write(item["categoria"])
+            c3.write(item["material"])
+            c4.write(item["quantidade"])
+            
+            if c5.button("🗑️", key=f"excluir_{i}"):
+                st.session_state.carrinho.pop(i)
+                st.rerun()
         
         # O BOTÃO MÁGICO: ENVIO PARA O SUPABASE
         if st.button("✅ Enviar Pedido Completo (Salvar Permanentemente no Banco de Dados)"):
