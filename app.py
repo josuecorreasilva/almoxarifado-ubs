@@ -202,9 +202,6 @@ if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
     })
     st.success(f"Adicionado: {quantidade}x {material}")
         
-    # Nova caixa de observação logo abaixo da quantidade
-    observacao = st.text_input("4. Observação geral (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
-        
     if st.button("➕ Adicionar Item ao Pedido"):
         st.session_state.carrinho.append({
             "distrito": distrito_selecionado, 
@@ -242,7 +239,7 @@ if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         
         # --- ENVIO PARA O BANCO DE DADOS ---
        # Caixa de Observação Geral do Pedido logo acima do botão
-    observacao_geral = st.text_area("📝 Observações Gerais / Pontuais do Pedido (Opcional)", placeholder="Ex: Entregar com urgência na parte da manhã...")
+    observacao_geral = st.text_area("📝 Observações Gerais (Opcional)", placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...")
 
     if st.button("✅ Enviar Pedido Completo"):
         if not supabase:
