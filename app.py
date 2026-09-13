@@ -44,7 +44,7 @@ distritos_ubs = {
 # Link da Planilha do Google Sheets para Carregamento da Lista de Materiais
 # MANTENHA O SEU LINK AQUI (aquele que termina em ?output=csv)
 url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
-st.image("https://upload.wikimedia.org/wikipedia/commons/4/41/Bras%C3%A3o_de_Pelotas.png", width=150)
+st.image("st.image("logo.png", width=150))
 st.title("📦 Sistema de Pedidos - Almoxarifado Central (BD Profissional)")
 
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial (Pedidos Salvos)"])
