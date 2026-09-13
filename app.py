@@ -285,27 +285,24 @@ with aba2:
                 
                 pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().reset_index(drop=True)
                 
-                # BLOCO ENVOLVIDO POR UMA TAG HTML COM A CLASSE QUE BLOQUEIA NA IMPRESSÃO
-                st.markdown('<div class="nao-imprimir">', unsafe_allow_html=True)
-                st.write("**Lista de Pedidos Realizados:**")
-                st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.markdown("---")
-                st.markdown('<div class="nao-imprimir">', unsafe_allow_html=True)
-                st.write("### Detalhar e Imprimir Comprovante")
+                # Caixa de seleção para escolher o pedido
                 lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
                 pedido_selecionado = st.selectbox("Escolha o número do pedido para ver o comprovante oficial:", lista_opcoes)
-                st.markdown('</div>', unsafe_allow_html=True)
                 
-                if pedido_selecionado != "Selecione...":
+                # SE NENHUM PEDIDO FOI SELECIONADO, EXIBE O PAINEL GERAL
+                if pedido_selecionado == "Selecione...":
+                    st.write("**Lista de Pedidos Realizados:**")
+                    st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
+                
+                # SE UM PEDIDO FOI SELECIONADO, O PAINEL SOME E APARECE APENAS O COMPROVANTE OFICIAL
+                else:
                     detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                     
                     st.markdown("---")
                     
                     obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                    # COMPROVANTE OFICIAL QUE SERÁ IMPRESSO
+                    # COMPROVANTE OFICIAL LIMPO PARA IMPRESSÃO
                     st.markdown(f"""
                     <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
                         <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
@@ -318,7 +315,6 @@ with aba2:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # CAIXA DE OBSERVAÇÃO GERAL (Se houver texto)
                     if obs_geral.strip():
                         st.markdown(f"""
                         <div style="border: 1px dashed #e67e22; padding: 12px; border-radius: 6px; background-color: #fdfaf6; margin-top: 15px;">
@@ -329,7 +325,6 @@ with aba2:
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
                     
-                    # SEPARAÇÃO DOS ITENS POR CATEGORIA NO COMPROVANTE
                     categorias_presentes = detalhes["categoria"].unique()
                     
                     for cat in categorias_presentes:
