@@ -302,14 +302,25 @@ with aba2:
                     st.write("**Relação de Itens Solicitados:**")
                     
                     # Tabela detalhada incluindo a nova coluna de observação
-                    colunas_mostra = [c for c in ["categoria", "material", "quantidade", "observacao"] if c in detalhes.columns]
-                    df_detalhes_exib = detalhes[colunas_mostra].rename(columns={
-                        "categoria": "Categoria", 
-                        "material": "Material", 
-                        "quantidade": "Qtd", 
-                        "observacao": "Observação"
-                    })
-                    st.dataframe(df_detalhes_exib, use_container_width=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
+                    
+                    # Identifica todas as categorias únicas presentes neste pedido específico
+                    categorias_presentes = detalhes["categoria"].unique()
+                    
+                    # Cria um bloco separado para cada categoria encontrada
+                    for cat in categorias_presentes:
+                        st.markdown(f"<p style='margin-bottom: 5px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
+                        
+                        # Filtra apenas os itens da categoria da vez
+                        df_cat = detalhes[detalhes["categoria"] == cat][["material", "quantidade"]].rename(columns={
+                            "material": "Material", 
+                            "quantidade": "Qtd"
+                        })
+                        
+                        # Exibe a tabela limpa daquela categoria
+                        st.dataframe(df_cat, use_container_width=True, hide_index=True)
+                        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
                     
                     st.markdown("<br><br>", unsafe_allow_html=True)
                     st.markdown("____________________________________________________")
