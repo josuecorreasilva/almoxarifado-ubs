@@ -164,7 +164,7 @@ with aba2:
         with st.spinner('Carregando pedidos históricos do banco de dados profissional... Isso pode levar alguns segundos.'):
             try:
                 # Retorna todos os registros ordenados pelo 'id' de forma descendente (mais recentes primeiro)
-                response = supabase.table("pedidos").select("*").order("id", ascending=False).execute()
+                response = supabase.table("pedidos").select("*").order("id", desc=True).execute()
                 df_supabase = pd.DataFrame(response.data)
             except Exception as e:
                 st.error(f"Erro ao carregar dados históricos do banco de dados Supabase: {e}")
