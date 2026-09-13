@@ -271,71 +271,75 @@ with aba1:
 with aba2:
     st.subheader("Painel de Controle Central")
     
-    if supabase:
-        with st.spinner('Carregando pedidos históricos...'):
-            try:
-                # POR QUE: ".select('*')" pede TODAS as colunas. ".order('id', desc=True)" traz os mais novos no topo.
-                response = supabase.table("pedidos").select("*").order("id", desc=True).execute()
-                df_supabase = pd.DataFrame(response.data)
-            except Exception as e:
-                st.error("Erro ao carregar dados.")
-                df_supabase = pd.DataFrame()
-
-        if not df_supabase.empty:
-            if 'id' in df_supabase.columns:
-                df_supabase = df_supabase.sort_values(by='id', ascending=False)
+    if not supabase:
+        st.error("Banco de dados desconectado.")
+    else:
+        try:
+            response = supabase.table("pedidos").select("*").execute()
+            dados = response.data
             
-            # POR QUE: A tabela tem todos os materiais soltos. O groupby junta eles em "blocos" pelo número do pedido.
-            if 'numero_pedido' in df_supabase.columns:
-                resumo_pedidos = df_supabase.groupby(["numero_pedido", "data", "distrito", "ubs"]).size().reset_index(name="Total Itens")
-                df_exibicao_painel = resumo_pedidos.rename(columns={"numero_pedido":"Nº Pedido", "data":"Data", "distrito":"Distrito", "ubs":"UBS"})
+            if not dados:
+                st.info("Nenhum pedido registrado no sistema.")
+            else:
+                df_supabase = pd.DataFrame(dados)
                 
-                st.dataframe(df_exibicao_painel, use_container_width=True)
+                # ENVOLVEMOS A TABELA GERAL COM A CLASSE QUE BLOQUEIA A IMPRESSÃO
+                st.markdown('<div class="nao-imprimir">', unsafe_allow_html=True)
+                st.write("**Lista de Pedidos Realizados:**")
+                
+                # Exibe a tabela resumo para gerenciamento
+                pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().reset_index(drop=True)
+                st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
+                st.markdown('</div>', unsafe_allow_html=True, _html_escaped=True) # Fim do bloco oculto na impressão
                 
                 st.markdown("---")
-                lista_pedidos_drop = resumo_pedidos["numero_pedido"].unique().tolist()
-                pedido_selecionado = st.selectbox("Detalhar Pedido:", ["Selecione..."] + lista_pedidos_drop)
+                st.write("### Detalhar e Imprimir Comprovante")
                 
-               # Se a pessoa escolher um pedido na caixa de seleção, o sistema exibe a folha de impressão
+                lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
+                pedido_selecionado = st.selectbox("Escolha o número do pedido para ver o comprovante oficial:", lista_opcoes)
+                
                 if pedido_selecionado != "Selecione...":
                     detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                     
                     st.markdown("---")
                     
-                    # 📄 CABEÇALHO DO DOCUMENTO OFICIAL PARA O ALMOXARIFADO
+                    obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
+
+                    # COMPROVANTE OFICIAL QUE SERÁ IMPRESSO
                     st.markdown(f"""
-                    <div style="border: 2px solid #ccc; padding: 20px; border-radius: 10px; background-color: #fafafa;">
-                        <h3 style="text-align: center; color: #333;">📦 SECRETARIA MUNICIPAL DE SAÚDE</h3>
-                        <h4 style="text-align: center; color: #666; margin-bottom: 20px;">Comprovante de Requisição de Materiais - SisPAC</h4>
-                        <hr>
-                        <p><b>Nº do Pedido:</b> {pedido_selecionado}</p>
-                        <p><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
-                        <p><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
-                        <p><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
+                    <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
+                        <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
+                        <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Comprovante de Requisição de Materiais - SisPAC</h4>
+                        <hr style="border: 0.5px solid #ccc;">
+                        <p style="margin: 5px 0;"><b>Nº do Pedido:</b> {pedido_selecionado}</p>
+                        <p style="margin: 5px 0;"><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
+                        <p style="margin: 5px 0;"><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
+                        <p style="margin: 5px 0;"><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.write("**Relação de Itens Solicitados:**")
-                    
-                    # Tabela detalhada incluindo a nova coluna de observação
+                    # CAIXA DE OBSERVAÇÃO GERAL (Se houver texto)
+                    if obs_geral.strip():
+                        st.markdown(f"""
+                        <div style="border: 1px dashed #e67e22; padding: 12px; border-radius: 6px; background-color: #fdfaf6; margin-top: 15px;">
+                            <p style="margin: 0; color: #d35400; font-size: 14px;"><b>📌 Observações Gerais do Pedido:</b><br>{obs_geral}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
                     
-                    # Identifica todas as categorias únicas presentes neste pedido específico
+                    # SEPARAÇÃO DOS ITENS POR CATEGORIA NO COMPROVANTE
                     categorias_presentes = detalhes["categoria"].unique()
                     
-                    # Cria um bloco separado para cada categoria encontrada
                     for cat in categorias_presentes:
                         st.markdown(f"<p style='margin-bottom: 5px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
                         
-                        # Filtra apenas os itens da categoria da vez
                         df_cat = detalhes[detalhes["categoria"] == cat][["material", "quantidade"]].rename(columns={
                             "material": "Material", 
                             "quantidade": "Qtd"
                         })
                         
-                        # Exibe a tabela limpa daquela categoria
                         st.dataframe(df_cat, use_container_width=True, hide_index=True)
                         st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
                     
@@ -344,11 +348,13 @@ with aba2:
                     st.markdown("Assinatura do Responsável / Recebimento no Almoxarifado Central")
                     st.markdown("<br>", unsafe_allow_html=True)
 
-                    # Botão que aciona a impressão do navegador
                     if st.button("🖨️ Imprimir ou Salvar Pedido em PDF"):
-                        st.info("💡 **Dica:** Na janela de impressão que vai abrir, altere a impressora destino para **'Salvar como PDF'** caso queira guardar o arquivo digitalmente.")
+                        st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                         st.components.v1.html("""
                             <script>
                                 window.parent.print();
                             </script>
                         """, height=0)
+                        
+        except Exception as e:
+            st.error(f"Erro ao carregar dados do painel: {e}")
