@@ -13,7 +13,7 @@ st.set_page_config(page_title="Almoxarifado Saúde (Profissional)", layout="wide
 # ATENÇÃO ARQUITETO DE SOLUÇÕES:
 # Cole o seu URL e a chave Anon AQUI, dentro das aspas, direto no GitHub.
 # NÃO cole essas informações no chat com a IA.
-supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co/rest/v1/"
+supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co"
 supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF"
 
 # Inicializa o cliente Supabase se as credenciais estiverem preenchidas
