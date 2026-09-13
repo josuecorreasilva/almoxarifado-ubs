@@ -297,21 +297,35 @@ with aba2:
                     # VISÃO 1: ACOMPANHAR PEDIDOS E COMPROVANTES
                     # ==========================================
                     if modo_aba2 == "📋 Acompanhar Pedidos e Comprovantes":
-                        pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
+                        # Garante que a coluna status existe no dataframe para exibição
+                        if 'status' not in df_supabase.columns:
+                            df_supabase['status'] = 'Pedido enviado'
+
+                        pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs", "status"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
                         
                         lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
                         pedido_selecionado = st.selectbox("Escolha o número do pedido para ver o comprovante oficial:", lista_opcoes)
                         
                         if pedido_selecionado == "Selecione...":
-                            st.write("**Lista de Pedidos Realizados:**")
+                            st.write("**Lista de Pedidos Realizados (com Status atualizado):**")
                             st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
                         else:
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
-                            
+                            status_atual = detalhes['status'].iloc[0] if 'status' in detalhes.columns else "Pedido enviado"
+
+                            # AUTOMATIZAÇÃO DE STATUS PARA A GESTÃO:
+                            # Se quem abriu é a GESTÃO e o status ainda era "Pedido enviado", atualiza para "Pedido recebido"
+                            if st.session_state.perfil == "GESTAO" and status_atual == "Pedido enviado":
+                                try:
+                                    supabase.table("pedidos").update({"status": "Pedido recebido"}).eq("numero_pedido", pedido_selecionado).execute()
+                                    status_atual = "Pedido recebido"
+                                except Exception as e:
+                                    pass # Mantém o fluxo caso ocorra falha de rede momentânea
+
                             st.markdown("---")
                             obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                            # COMPROVANTE OFICIAL
+                            # COMPROVANTE OFICIAL COM BADGE DE STATUS
                             st.markdown(f"""
                             <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
@@ -321,6 +335,7 @@ with aba2:
                                 <p style="margin: 5px 0;"><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
                                 <p style="margin: 5px 0;"><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
                                 <p style="margin: 5px 0;"><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
+                                <p style="margin: 5px 0;"><b>Status Atual:</b> <span style="background-color: #e67e22; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold;">{status_atual}</span></p>
                             </div>
                             """, unsafe_allow_html=True)
                             
@@ -347,7 +362,14 @@ with aba2:
                             st.markdown("Assinatura do Responsável / Recebimento no Almoxarifado Central")
                             st.markdown("<br>", unsafe_allow_html=True)
 
+                            # BOTÃO DE IMPRESSÃO QUE ATUALIZA O STATUS PARA "Em processamento"
                             if st.button("🖨️ Imprimir ou Salvar Pedido em PDF"):
+                                if st.session_state.perfil == "GESTAO":
+                                    try:
+                                        supabase.table("pedidos").update({"status": "Em processamento"}).eq("numero_pedido", pedido_selecionado).execute()
+                                    except:
+                                        pass
+
                                 st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
