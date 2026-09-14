@@ -106,10 +106,8 @@ with col_titulo:
 # 6. ABAS DINÂMICAS POR PERFIL DE ACESSO
 # ==========================================
 if st.session_state.perfil == "UBS":
-    # UBS enxerga o formulário de pedido E uma aba exclusiva de acompanhamento e histórico com pesquisa
     aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Acompanhar Meus Pedidos"])
 else:
-    # GESTÃO enxerga o Painel Central, os Relatórios e a Gestão de Busca Avançada
     aba1, aba2, aba3 = st.tabs(["Painel Gerencial", "Relatórios e Parecer Técnico", "Acompanhar e Buscar Pedidos"])
 
 # ==========================================
@@ -308,16 +306,15 @@ if st.session_state.perfil == "UBS":
 else:
     with aba1:
         st.subheader("📊 Painel Gerencial (Visão Global)")
-        # (Aqui permanece toda a estrutura antiga do painel de controle central de pedidos)
         st.info("Painel gerencial centralizado para visualização de todas as unidades da rede.")
         
     with aba2:
         st.subheader("📈 Relatórios Analíticos, Gráficos e Parecer Técnico")
-        # (Aqui permanece todo o gerador de relatórios com gráficos e parecer oficial)
+        st.info("Gerador de relatórios analíticos, gráficos de consumo e emissão de documentos oficiais.")
         
     with aba3:
         st.subheader("🔍 Acompanhamento e Busca Avançada na Rede")
-        # (Aqui o gestor pode pesquisar pedidos específicos de qualquer UBS do município)
+        st.info("Módulo de busca global e acompanhamento de pedidos de todas as unidades.")
 
     st.markdown("---")
     
