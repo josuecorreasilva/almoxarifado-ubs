@@ -231,8 +231,10 @@ if st.session_state.perfil == "UBS":
                     try:
                         response = supabase.table("pedidos").insert(lista_insercao).execute()
                         st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
+                        
+                        # Limpa apenas o carrinho (a observação limpa sozinha no recarregamento)
                         st.session_state.carrinho = []
-                        st.session_state["input_observacao_geral"] = ""
+                        
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
