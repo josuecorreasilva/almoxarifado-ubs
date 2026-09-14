@@ -26,7 +26,7 @@ st.markdown("""
 
 # POR QUE: Conecta o seu aplicativo ao banco de dados na nuvem (Supabase)
 supabase_url = "https://dglgicnsdelxvhkxwfzd.supabase.co"
-supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF" 
+supabase_key = "sb_publishable_D6M75JYkHMrtR40Caw1Ruw_RYO3qWbF"
 supabase = create_client(supabase_url, supabase_key)
 
 # ==========================================
