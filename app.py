@@ -301,17 +301,310 @@ if st.session_state.perfil == "UBS":
                 st.error(f"Erro ao carregar histórico: {e}")
 
 # ==========================================
-# FLUXO DA GESTÃO (3 ABAS)
+# FLUXO DA GESTÃO (3 ABAS COMPLETAS)
 # ==========================================
 else:
     with aba1:
-        st.subheader("📊 Painel Gerencial (Visão Global)")
-        st.info("Painel gerencial centralizado para visualização de todas as unidades da rede.")
+        st.subheader("📊 Painel de Controle e Relatórios")
+        
+        if not supabase:
+            st.error("Banco de dados desconectado.")
+        else:
+            try:
+                response = supabase.table("pedidos").select("*").execute()
+                dados = response.data
+                
+                if not dados:
+                    st.info("Nenhum pedido registrado no sistema.")
+                else:
+                    df_supabase = pd.DataFrame(dados)
+                    df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
+                    
+                    modo_aba2 = st.radio(
+                        "Escolha a visualização:", 
+                        ["📋 Acompanhar Pedidos e Comprovantes", "📈 Relatórios Analíticos e Gráficos"],
+                        horizontal=True,
+                        key="radio_modo_aba2_gestao"
+                    )
+                    
+                    st.markdown("---")
+                    
+                    if modo_aba2 == "📋 Acompanhar Pedidos e Comprovantes":
+                        if 'status' not in df_supabase.columns:
+                            df_supabase['status'] = 'Pedido enviado'
+
+                        pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs", "status"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
+                        
+                        lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
+                        pedido_selecionado = st.selectbox("Escolha o número do pedido para ver o comprovante oficial:", lista_opcoes)
+                        
+                        if pedido_selecionado == "Selecione...":
+                            st.write("**Lista de Pedidos Realizados (com Status atualizado):**")
+                            st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
+                        else:
+                            detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
+                            status_atual = detalhes['status'].iloc[0] if 'status' in detalhes.columns else "Pedido enviado"
+
+                            if status_atual == "Pedido enviado":
+                                try:
+                                    supabase.table("pedidos").update({"status": "Pedido recebido"}).eq("numero_pedido", pedido_selecionado).execute()
+                                    status_atual = "Pedido recebido"
+                                except:
+                                    pass
+
+                            st.markdown("---")
+                            obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
+
+                            st.markdown(f"""
+                            <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
+                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
+                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Comprovante de Requisição de Materiais - SisPAC</h4>
+                                <hr style="border: 0.5px solid #ccc;">
+                                <p style="margin: 5px 0;"><b>Nº do Pedido:</b> {pedido_selecionado}</p>
+                                <p style="margin: 5px 0;"><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
+                                <p style="margin: 5px 0;"><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
+                                <p style="margin: 5px 0;"><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
+                                <p style="margin: 5px 0;"><b>Status Atual:</b> <span style="background-color: #e67e22; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold;">{status_atual}</span></p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            if obs_geral.strip():
+                                st.markdown(f"""
+                                <div style="margin-top: 10px; padding: 12px; border: 1px solid #d35400; background-color: #fdfaf6; border-radius: 5px;">
+                                    <span style="color: #d35400; font-weight: bold;">📌 Observações Gerais do Pedido:</span><br>
+                                    <span style="color: #333; font-size: 14px;">{obs_geral}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.write("**Relação de Itens Solicitados:**")
+                            
+                            categorias_presentes = detalhes["categoria"].unique()
+                            for cat in categorias_presentes:
+                                st.markdown(f"<p style='margin-bottom: 5px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
+                                df_cat = detalhes[detalhes["categoria"] == cat][["material", "quantidade"]].rename(columns={"material": "Material", "quantidade": "Qtd"})
+                                st.dataframe(df_cat, use_container_width=True, hide_index=True)
+                                st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+                            
+                            st.markdown("<br><br>", unsafe_allow_html=True)
+                            st.markdown("____________________________________________________")
+                            st.markdown("Assinatura do Responsável / Recebimento no Almoxarifado Central")
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                            if st.button("🖨️ Imprimir ou Salvar Pedido em PDF"):
+                                try:
+                                    supabase.table("pedidos").update({"status": "Em processamento"}).eq("numero_pedido", pedido_selecionado).execute()
+                                except:
+                                    pass
+
+                                st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
+                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+
+                    else:
+                        st.write("### 📈 Painel Analítico e Gráficos de Consumo")
+                        
+                        col_r1, col_r2, col_r3 = st.columns(3)
+                        with col_r1:
+                            tipo_relatorio = st.selectbox("Tipo de Relatório", ["Geral (Consolidado)", "Por Categoria"], key="tr_analitico")
+                        with col_r2:
+                            periodo = st.selectbox("Período", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="per_analitico")
+                        with col_r3:
+                            lista_ubs_filtro = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
+                            ubs_escolhida = st.selectbox("Filtrar Unidade", lista_ubs_filtro, key="ubs_analitico_gestao")
+
+                        df_rel = df_supabase.copy()
+                        if ubs_escolhida != "Todas as UBS":
+                            df_rel = df_rel[df_rel['ubs'] == ubs_escolhida]
+                            
+                        agora = pd.Timestamp.now()
+                        if periodo == "Última Semana (7 dias)":
+                            df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=7))]
+                        elif periodo == "Último Mês (30 dias)":
+                            df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=30))]
+                        elif periodo == "Ano Atual":
+                            df_rel = df_rel[df_rel['data_dt'].dt.year == agora.year]
+
+                        st.markdown("---")
+                        
+                        if df_rel.empty:
+                            st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
+                        else:
+                            if tipo_relatorio == "Geral (Consolidado)":
+                                st.write(f"**Consolidado Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
+                                df_consolidado = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                                df_consolidado.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
+                                
+                                st.dataframe(df_consolidado, use_container_width=True, hide_index=True)
+                                
+                                st.markdown("#### 📊 Gráfico de Consumo por Material")
+                                df_grafico = df_consolidado.set_index("Material")["Quantidade Total Solicitada"]
+                                st.bar_chart(df_grafico)
+                                
+                                csv = df_consolidado.to_csv(index=False).encode('utf-8')
+                                st.download_button("📥 Baixar Relatório em CSV", data=csv, file_name="relatorio_geral_materiais.csv", mime="text/csv", key="dl_geral")
+                                
+                            else:
+                                cat_disponiveis = df_rel["categoria"].unique().tolist()
+                                cat_escolhida = st.selectbox("Selecione a Categoria Desejada", cat_disponiveis, key="cat_escolhida_sel")
+                                
+                                df_cat_filtrado = df_rel[df_rel["categoria"] == cat_escolhida]
+                                df_cat_cons = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
+                                df_cat_cons.columns = ["Material", "Quantidade Total Solicitada"]
+                                
+                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Unidade(s): {ubs_escolhida}**")
+                                st.dataframe(df_cat_cons, use_container_width=True, hide_index=True)
+                                
+                                st.markdown(f"#### 📊 Gráfico de Consumo - {cat_escolhida}")
+                                df_grafico_cat = df_cat_cons.set_index("Material")["Quantidade Total Solicitada"]
+                                st.bar_chart(df_grafico_cat)
+                                
+                                csv = df_cat_cons.to_csv(index=False).encode('utf-8')
+                                st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv", key="dl_cat")
+            except Exception as e:
+                st.error(f"Erro ao carregar painel gerencial: {e}")
         
     with aba2:
-        st.subheader("📈 Relatórios Analíticos, Gráficos e Parecer Técnico")
-        st.info("Gerador de relatórios analíticos, gráficos de consumo e emissão de documentos oficiais.")
+        st.subheader("📈 Emissão de Relatório Oficial e Parecer Técnico")
         
+        if not supabase:
+            st.error("Banco de dados desconectado.")
+        else:
+            try:
+                response = supabase.table("pedidos").select("*").execute()
+                dados = response.data
+                
+                if not dados:
+                    st.info("Nenhum pedido registrado no sistema.")
+                else:
+                    df_supabase = pd.DataFrame(dados)
+                    df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
+                    
+                    col_e1, col_e2, col_e3 = st.columns(3)
+                    with col_e1:
+                        tipo_imp_oficial = st.selectbox("Formato do Relatório", ["Consolidado Geral", "Por Categoria"], key="tipo_imp_oficial")
+                    with col_e2:
+                        periodo_imp = st.selectbox("Período de Impressão", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp_oficial")
+                    with col_e3:
+                        ubs_imp = st.selectbox("Unidade Referência", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="u_imp_oficial")
+
+                    df_imp = df_supabase.copy()
+                    if ubs_imp != "Todas as UBS":
+                        df_imp = df_imp[df_imp['ubs'] == ubs_imp]
+                        
+                    agora = pd.Timestamp.now()
+                    if periodo_imp == "Última Semana (7 dias)":
+                        df_imp = df_imp[df_imp['data_dt'] >= (agora - pd.Timedelta(days=7))]
+                    elif periodo_imp == "Último Mês (30 dias)":
+                        df_imp = df_imp[df_imp['data_dt'] >= (agora - pd.Timedelta(days=30))]
+                    elif periodo_imp == "Ano Atual":
+                        df_imp = df_imp[df_imp['data_dt'].dt.year == agora.year]
+
+                    cat_escolhida_imp = None
+                    if tipo_imp_oficial == "Por Categoria":
+                        if not df_imp.empty:
+                            cat_disponiveis_imp = df_imp["categoria"].unique().tolist()
+                            cat_escolhida_imp = st.selectbox("Selecione a Categoria para o Relatório Oficial", cat_disponiveis_imp, key="cat_oficial_sel")
+                            df_imp = df_imp[df_imp["categoria"] == cat_escolhida_imp]
+
+                    st.markdown("---")
+                    
+                    if df_imp.empty:
+                        st.warning("⚠️ Nenhum registro encontrado para gerar este relatório oficial com os filtros selecionados.")
+                    else:
+                        if tipo_imp_oficial == "Consolidado Geral":
+                            df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                            df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+                            titulo_rel_oficial = "Relatório Oficial Consolidado Geral de Insumos - SisPAC"
+                        else:
+                            df_rel_final = df_imp.groupby(["material"])["quantidade"].sum().reset_index()
+                            df_rel_final.columns = ["Material", "Quantidade Total"]
+                            titulo_rel_oficial = f"Relatório Oficial por Categoria ({cat_escolhida_imp}) - SisPAC"
+
+                        df_rel_final = df_rel_final.sort_values(by="Quantidade Total", ascending=False).reset_index(drop=True)
+
+                        st.markdown(f"""
+                        <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
+                            <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
+                            <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{titulo_rel_oficial}</h4>
+                            <hr style="border: 0.5px solid #ccc;">
+                            <p style="margin: 5px 0;"><b>Unidade / Escopo:</b> {ubs_imp}</p>
+                            <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
+                            <p style="margin: 5px 0;"><b>Data de Emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.write(f"**1. Relação de Itens Solicitados:**")
+                        st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
+                        
+                        total_itens_diferentes = len(df_rel_final)
+                        total_geral_pecas = df_rel_final["Quantidade Total"].sum()
+                        material_destaque = df_rel_final.iloc[0]["Material"] if not df_rel_final.empty else "N/A"
+                        qtd_destaque = df_rel_final.iloc[0]["Quantidade Total"] if not df_rel_final.empty else 0
+                        
+                        escopo_texto = f"categoria <b>{cat_escolhida_imp}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
+                        
+                        parecer_tecnico = (
+                            f"O presente documento consubstancia o relatório gerencial de requisição de insumos referente ao {escopo_texto} "
+                            f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                            f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
+                            f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
+                            f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques pelo Almoxarifado Central."
+                        )
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.write("**2. Parecer Técnico / Administrativo Preliminar:***")
+                        st.markdown(f"""
+                        <div style="border: 1px solid #7f8c8d; padding: 15px; border-radius: 6px; background-color: #fcfcfc;">
+                            <p style="text-align: justify; color: #2c3e50; font-size: 14px; line-height: 1.6; margin: 0;">
+                                {parecer_tecnico}
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown("<br><br>", unsafe_allow_html=True)
+                        st.markdown("____________________________________________________")
+                        st.markdown("Assinatura e Carimbo do Responsável / Gestão do Almoxarifado")
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        if st.button("🖨️ Imprimir ou Salvar Relatório Oficial em PDF", key="btn_print_rel_oficial"):
+                            st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
+                            st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+            except Exception as e:
+                st.error(f"Erro ao carregar relatórios oficiais: {e}")
+
     with aba3:
         st.subheader("🔍 Acompanhamento e Busca Avançada na Rede")
-        st.info("Módulo de busca global e acompanhamento de pedidos de todas as unidades.")
+        
+        if not supabase:
+            st.error("Banco de dados desconectado.")
+        else:
+            try:
+                response = supabase.table("pedidos").select("*").execute()
+                dados = response.data
+                
+                if not dados:
+                    st.info("Nenhum pedido registrado no sistema.")
+                else:
+                    df_supabase = pd.DataFrame(dados)
+                    if 'status' not in df_supabase.columns:
+                        df_supabase['status'] = 'Pedido enviado'
+
+                    termo_global = st.text_input("Pesquisar em toda a rede (Nº do pedido, UBS ou material):", placeholder="Ex: Balsa, PED-..., Seringa...")
+                    
+                    df_busca_rede = df_supabase.copy()
+                    if termo_global:
+                        df_busca_rede = df_busca_rede[
+                            df_busca_rede['numero_pedido'].astype(str).str.contains(termo_global, case=False, na=False) |
+                            df_busca_rede['ubs'].astype(str).str.contains(termo_global, case=False, na=False) |
+                            df_busca_rede['material'].astype(str).str.contains(termo_global, case=False, na=False)
+                        ]
+                    
+                    pedidos_rede = df_busca_rede[["numero_pedido", "data", "ubs", "status"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
+                    
+                    if pedidos_rede.empty:
+                        st.warning("Nenhum pedido encontrado com esse termo de busca.")
+                    else:
+                        st.dataframe(pedidos_rede, use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.error(f"Erro ao carregar busca avançada: {e}")
