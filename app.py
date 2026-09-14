@@ -228,6 +228,14 @@ with aba1:
             numero_pedido = f"PED-{int(time.time())}"
             data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+            # --- ADICIONE ESTAS LINHAS AQUI PARA DEFINIR A VARIÁVEL ---
+            obs_limpa = observacao_geral.strip() if observacao_geral else ""
+            if not obs_limpa or obs_limpa.upper() == "EMPTY":
+                texto_observacao = "Sem observação"
+            else:
+                texto_observacao = obs_limpa
+            # ---------------------------------------------------------
+
             with st.spinner('Salvando pedido no servidor...'):
                 lista_insercao = []
                 for item in st.session_state.carrinho:
@@ -244,14 +252,10 @@ with aba1:
                     })
 
                 try:
-                    # Grava no Supabase
                     response = supabase.table("pedidos").insert(lista_insercao).execute()
                     st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
                     
-                    # SEGURANÇA: Limpa o carrinho e reseta a caixa de observação geral automaticamente
                     st.session_state.carrinho = []
-                    st.session_state["input_observacao_geral"] = ""
-                    
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
