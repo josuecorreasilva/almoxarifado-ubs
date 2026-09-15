@@ -118,7 +118,6 @@ with col_titulo:
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial"])
 
 # --- ABA 1: FORMULÁRIO ---
-# --- ABA 1: FORMULÁRIO ---
 with aba1:
     st.subheader("Formulário da Unidade Básica de Saúde")
     
@@ -131,7 +130,6 @@ with aba1:
             ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
     else:
         unidade_usuario = st.session_state.ubs_nome 
-        
         distrito_detectado = "Não Encontrado"
         for distrito, unidades in distritos_ubs.items():
             if unidade_usuario in unidades:
@@ -147,11 +145,10 @@ with aba1:
     
     try:
         df_materiais = pd.read_csv(url_google_sheets_materiais)
-        # Padroniza nomes de colunas caso venham com espaços
         df_materiais.columns = df_materiais.columns.str.strip()
         lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
     except:
-        st.error("Erro ao carregar materiais. Verifique o link do Google Sheets no início do código.")
+        st.error("Erro ao carregar materiais. Verifique o link do Google Sheets.")
         lista_categorias = ["Erro"]
         df_materiais = pd.DataFrame()
         
@@ -166,31 +163,25 @@ with aba1:
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
         
-    # Seleção do material e quantidade
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2 = st.columns(2)
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
+    with col2:
+        quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-    # Puxa o valor unitário do material selecionado na planilha
+    # Puxa o valor unitário da planilha silenciosamente em segundo plano
     valor_unitario_atual = 0.0
     if not df_materiais.empty and material:
         item_row = df_materiais[df_materiais["Material"] == material]
-        # Procura por colunas comuns de preço
         col_preco = next((c for c in ["Valor Unitario", "Valor Unitário", "Preço", "Preco"] if c in df_materiais.columns), None)
         if col_preco and not item_row.empty:
             val_raw = item_row[col_preco].values[0]
             try:
-                # Trata formato brasileiro (vírgula para ponto se necessário)
                 if isinstance(val_raw, str):
                     val_raw = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
                 valor_unitario_atual = float(val_raw)
             except:
                 valor_unitario_atual = 0.0
-
-    with col2:
-        st.metric("Valor Unitário", f"R$ {valor_unitario_atual:.2f}")
-    with col3:
-        quantidade = st.number_input("3. Quantidade", min_value=1, value=10)
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
@@ -203,38 +194,29 @@ with aba1:
             "valor_unitario": valor_unitario_atual,
             "subtotal": subtotal
         })
-        st.success(f"Adicionado: {quantidade}x {material} (Subtotal: R$ {subtotal:.2f})")
+        st.success(f"Adicionado: {quantidade}x {material}")
 
-    # --- RESUMO DO CARRINHO COM CUSTOS ---
+    # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
         st.markdown("---")
-        st.write("### 🛒 Carrinho de Requisição (Centro de Custos)")
-        
-        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5, col_cab6 = st.columns([1.5, 2, 2, 1, 1.2, 0.5])
+        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
         col_cab1.write("**UBS**")
         col_cab2.write("**Categoria**")
         col_cab3.write("**Material**")
         col_cab4.write("**Qtd**")
-        col_cab5.write("**Subtotal**")
-        col_cab6.write("**Del**")
+        col_cab5.write("**Excluir**")
         st.markdown("---")
         
-        custo_total_pedido = 0.0
         for i, item in enumerate(st.session_state.carrinho):
-            c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2, 2, 1, 1.2, 0.5])
+            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
             c1.write(item["ubs"])
             c2.write(item["categoria"])
             c3.write(item["material"])
             c4.write(item["quantidade"])
-            sub_val = item.get("subtotal", item["quantidade"] * item.get("valor_unitario", 0))
-            c5.write(f"R$ {sub_val:.2f}")
-            custo_total_pedido += sub_val
             
-            if c6.button("🗑️", key=f"excluir_{i}_{item['material']}"):
+            if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
-
-        st.markdown(f"**💰 Custo Total Estimado do Pedido:** `R$ {custo_total_pedido:.2f}`")
 
     st.markdown("---")
     
@@ -256,7 +238,7 @@ with aba1:
             obs_limpa = observacao_geral.strip() if observacao_geral else ""
             texto_observacao = obs_limpa if obs_limpa else "Sem observação"
 
-            with st.spinner('Salvando pedido e calculando centro de custos...'):
+            with st.spinner('Salvando pedido no servidor...'):
                 lista_insercao = []
                 for item in st.session_state.carrinho:
                     lista_insercao.append({
@@ -275,7 +257,7 @@ with aba1:
 
                 try:
                     response = supabase.table("pedidos").insert(lista_insercao).execute()
-                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso! Custo total registrado.")
+                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
                     st.session_state.carrinho = []
                     st.rerun()
                 except Exception as e:
