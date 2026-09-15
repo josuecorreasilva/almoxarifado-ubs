@@ -118,19 +118,17 @@ with col_titulo:
 aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial"])
 
 # --- ABA 1: FORMULÁRIO ---
+# --- ABA 1: FORMULÁRIO ---
 with aba1:
     st.subheader("Formulário da Unidade Básica de Saúde")
     
     col_distrito, col_ubs = st.columns(2)
     
-    # Se for Gestão, as caixas ficam livres para escolher qualquer distrito
     if st.session_state.perfil == "GESTAO":
         with col_distrito:
             distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
         with col_ubs:
             ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
-            
-    # Se for UBS, o sistema trava as caixas na unidade exata que veio do banco de dados
     else:
         unidade_usuario = st.session_state.ubs_nome 
         
@@ -147,9 +145,10 @@ with aba1:
             
     st.markdown("---")
     
-    # POR QUE: Tenta (try) ler o Google Sheets. Se a internet cair, o aplicativo não quebra a tela toda.
     try:
         df_materiais = pd.read_csv(url_google_sheets_materiais)
+        # Padroniza nomes de colunas caso venham com espaços
+        df_materiais.columns = df_materiais.columns.str.strip()
         lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
     except:
         st.error("Erro ao carregar materiais. Verifique o link do Google Sheets no início do código.")
@@ -158,64 +157,90 @@ with aba1:
         
     categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
     
-    # Lógica que cruza os dados do Sheets para listar apenas materiais da categoria selecionada
     if not df_materiais.empty and "Categoria" in df_materiais.columns:
          df_filtrado = df_materiais[df_materiais["Categoria"] == categoria_selecionada]
          lista_de_itens = df_filtrado["Material"].dropna().tolist()
     else:
          lista_de_itens = ["Selecione Categoria"]
          
-    # POR QUE: O carrinho só é criado (vazio) se for a primeira vez que você abre a página.
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
         
-    # 3. Adição de Itens
-    col1, col2 = st.columns(2)
+    # Seleção do material e quantidade
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
+        
+    # Puxa o valor unitário do material selecionado na planilha
+    valor_unitario_atual = 0.0
+    if not df_materiais.empty and material:
+        item_row = df_materiais[df_materiais["Material"] == material]
+        # Procura por colunas comuns de preço
+        col_preco = next((c for c in ["Valor Unitario", "Valor Unitário", "Preço", "Preco"] if c in df_materiais.columns), None)
+        if col_preco and not item_row.empty:
+            val_raw = item_row[col_preco].values[0]
+            try:
+                # Trata formato brasileiro (vírgula para ponto se necessário)
+                if isinstance(val_raw, str):
+                    val_raw = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
+                valor_unitario_atual = float(val_raw)
+            except:
+                valor_unitario_atual = 0.0
+
     with col2:
-        quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
+        st.metric("Valor Unitário", f"R$ {valor_unitario_atual:.2f}")
+    with col3:
+        quantidade = st.number_input("3. Quantidade", min_value=1, value=10)
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
+        subtotal = quantidade * valor_unitario_atual
         st.session_state.carrinho.append({
             "distrito": distrito_selecionado, 
             "ubs": ubs_selecionada,
             "categoria": categoria_selecionada,
             "material": material,
-            "quantidade": quantidade
+            "quantidade": quantidade,
+            "valor_unitario": valor_unitario_atual,
+            "subtotal": subtotal
         })
-        st.success(f"Adicionado: {quantidade}x {material}")
+        st.success(f"Adicionado: {quantidade}x {material} (Subtotal: R$ {subtotal:.2f})")
 
-    # --- RESUMO DO CARRINHO ---
+    # --- RESUMO DO CARRINHO COM CUSTOS ---
     if len(st.session_state.carrinho) > 0:
         st.markdown("---")
-        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
+        st.write("### 🛒 Carrinho de Requisição (Centro de Custos)")
+        
+        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5, col_cab6 = st.columns([1.5, 2, 2, 1, 1.2, 0.5])
         col_cab1.write("**UBS**")
         col_cab2.write("**Categoria**")
         col_cab3.write("**Material**")
         col_cab4.write("**Qtd**")
-        col_cab5.write("**Excluir**")
+        col_cab5.write("**Subtotal**")
+        col_cab6.write("**Del**")
         st.markdown("---")
         
+        custo_total_pedido = 0.0
         for i, item in enumerate(st.session_state.carrinho):
-            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
+            c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2, 2, 1, 1.2, 0.5])
             c1.write(item["ubs"])
             c2.write(item["categoria"])
             c3.write(item["material"])
             c4.write(item["quantidade"])
+            sub_val = item.get("subtotal", item["quantidade"] * item.get("valor_unitario", 0))
+            c5.write(f"R$ {sub_val:.2f}")
+            custo_total_pedido += sub_val
             
-            # Chave única para exclusão linha por linha sem perder o estado da página
-            if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
+            if c6.button("🗑️", key=f"excluir_{i}_{item['material']}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
+        st.markdown(f"**💰 Custo Total Estimado do Pedido:** `R$ {custo_total_pedido:.2f}`")
+
     st.markdown("---")
     
-    # --- OBSERVAÇÃO GERAL E ENVIO ---
-    # Adicionamos uma key para controlar o estado do campo de texto
     observacao_geral = st.text_area(
         "📝 Observações Gerais (Opcional)", 
-        placeholder="Ex: Urgência na entrega, horário preferencial, restrição de acesso ou orientações ao almoxarifado...",
+        placeholder="Ex: Urgência na entrega, horário preferencial...",
         key="input_observacao_geral"
     )
 
@@ -228,15 +253,10 @@ with aba1:
             numero_pedido = f"PED-{int(time.time())}"
             data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # --- ADICIONE ESTAS LINHAS AQUI PARA DEFINIR A VARIÁVEL ---
             obs_limpa = observacao_geral.strip() if observacao_geral else ""
-            if not obs_limpa or obs_limpa.upper() == "EMPTY":
-                texto_observacao = "Sem observação"
-            else:
-                texto_observacao = obs_limpa
-            # ---------------------------------------------------------
+            texto_observacao = obs_limpa if obs_limpa else "Sem observação"
 
-            with st.spinner('Salvando pedido no servidor...'):
+            with st.spinner('Salvando pedido e calculando centro de custos...'):
                 lista_insercao = []
                 for item in st.session_state.carrinho:
                     lista_insercao.append({
@@ -247,14 +267,15 @@ with aba1:
                         "categoria": item["categoria"],
                         "material": item["material"],
                         "quantidade": item["quantidade"],
+                        "valor_unitario": item.get("valor_unitario", 0.0),
+                        "custo_total": item.get("subtotal", 0.0),
                         "observacao": texto_observacao,
                         "status": "Pedido enviado"
                     })
 
                 try:
                     response = supabase.table("pedidos").insert(lista_insercao).execute()
-                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
-                    
+                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso! Custo total registrado.")
                     st.session_state.carrinho = []
                     st.rerun()
                 except Exception as e:
