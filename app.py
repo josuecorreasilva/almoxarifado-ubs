@@ -278,11 +278,14 @@ with aba2:
                 st.info("Nenhum pedido registrado no sistema.")
             else:
                 df_supabase = pd.DataFrame(dados)
-                
-                # Converte a coluna de data para o formato de data/hora do Pandas
                 df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
                 
-                # SEGURANÇA: Se o perfil for UBS, restringe estritamente aos pedidos dela
+                # Garante que as colunas de custo existem no DataFrame
+                if 'valor_unitario' not in df_supabase.columns:
+                    df_supabase['valor_unitario'] = 0.0
+                if 'custo_total' not in df_supabase.columns:
+                    df_supabase['custo_total'] = 0.0
+                
                 if st.session_state.perfil == "UBS":
                     df_supabase = df_supabase[df_supabase['ubs'].str.lower() == st.session_state.ubs_nome.lower()]
                     st.info(f"Visualizando dados exclusivos da unidade: **{st.session_state.ubs_nome}**")
@@ -290,7 +293,6 @@ with aba2:
                 if df_supabase.empty:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
-                    # Sub-navegação interna na Aba 2
                     modo_aba2 = st.radio(
                         "Escolha a visualização:", 
                         ["📋 Acompanhar Pedidos e Comprovantes", "📈 Relatórios Analíticos e Gráficos", "🖨️ Emitir Relatório Oficial (Imprimir)"],
@@ -300,11 +302,7 @@ with aba2:
                     
                     st.markdown("---")
                     
-                    # ==========================================
-                    # VISÃO 1: ACOMPANHAR PEDIDOS E COMPROVANTES
-                    # ==========================================
                     if modo_aba2 == "📋 Acompanhar Pedidos e Comprovantes":
-                        # Garante que a coluna status existe no dataframe para exibição
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
@@ -320,19 +318,16 @@ with aba2:
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = detalhes['status'].iloc[0] if 'status' in detalhes.columns else "Pedido enviado"
 
-                            # AUTOMATIZAÇÃO DE STATUS PARA A GESTÃO:
-                            # Se quem abriu é a GESTÃO e o status ainda era "Pedido enviado", atualiza para "Pedido recebido"
                             if st.session_state.perfil == "GESTAO" and status_atual == "Pedido enviado":
                                 try:
                                     supabase.table("pedidos").update({"status": "Pedido recebido"}).eq("numero_pedido", pedido_selecionado).execute()
                                     status_atual = "Pedido recebido"
-                                except Exception as e:
-                                    pass # Mantém o fluxo caso ocorra falha de rede momentânea
+                                except:
+                                    pass
 
                             st.markdown("---")
                             obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                            # COMPROVANTE OFICIAL COM BADGE DE STATUS
                             st.markdown(f"""
                             <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
@@ -358,18 +353,41 @@ with aba2:
                             st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
                             
                             categorias_presentes = detalhes["categoria"].unique()
+                            custo_total_comprovante = 0.0
+
                             for cat in categorias_presentes:
                                 st.markdown(f"<p style='margin-bottom: 5px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
-                                df_cat = detalhes[detalhes["categoria"] == cat][["material", "quantidade"]].rename(columns={"material": "Material", "quantidade": "Qtd"})
+                                
+                                df_cat_raw = detalhes[detalhes["categoria"] == cat]
+                                
+                                # Se for GESTÃO, exibe colunas financeiras. Se for UBS, exibe apenas Material e Qtd.
+                                if st.session_state.perfil == "GESTAO":
+                                    df_cat = df_cat_raw[["material", "quantidade", "valor_unitario", "custo_total"]].copy()
+                                    df_cat.columns = ["Material", "Qtd", "Valor Unitário (R$)", "Custo Total (R$)"]
+                                    # Formata para exibição em moeda
+                                    df_cat["Valor Unitário (R$)"] = df_cat["Valor Unitário (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
+                                    df_cat["Custo Total (R$)"] = df_cat["Custo Total (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
+                                    
+                                    custo_total_comprovante += df_cat_raw["custo_total"].sum()
+                                else:
+                                    df_cat = df_cat_raw[["material", "quantidade"]].rename(columns={"material": "Material", "quantidade": "Qtd"})
+                                
                                 st.dataframe(df_cat, use_container_width=True, hide_index=True)
                                 st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
                             
+                            # Exibe o custo total do pedido apenas para a Gestão
+                            if st.session_state.perfil == "GESTAO":
+                                st.markdown(f"""
+                                <div style="padding: 10px; background-color: #f8f9fa; border-left: 4px solid #28a745; margin-bottom: 15px;">
+                                    <b>💰 Custo Total deste Pedido (Centro de Custos):</b> R$ {custo_total_comprovante:.2f}
+                                </div>
+                                """, unsafe_allow_html=True)
+
                             st.markdown("<br><br>", unsafe_allow_html=True)
                             st.markdown("____________________________________________________")
                             st.markdown("Assinatura do Responsável / Recebimento no Almoxarifado Central")
                             st.markdown("<br>", unsafe_allow_html=True)
 
-                            # BOTÃO DE IMPRESSÃO QUE ATUALIZA O STATUS PARA "Em processamento"
                             if st.button("🖨️ Imprimir ou Salvar Pedido em PDF"):
                                 if st.session_state.perfil == "GESTAO":
                                     try:
@@ -380,9 +398,6 @@ with aba2:
                                 st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
-                    # ==========================================
-                    # VISÃO 2: RELATÓRIOS ANALÍTICOS COM GRÁFICOS
-                    # ==========================================
                     elif modo_aba2 == "📈 Relatórios Analíticos e Gráficos":
                         st.write("### 📈 Painel Analítico e Gráficos de Consumo")
                         
@@ -418,13 +433,20 @@ with aba2:
                         else:
                             if tipo_relatorio == "Geral (Consolidado)":
                                 st.write(f"**Consolidado Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
-                                df_consolidado = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
-                                df_consolidado.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
+                                
+                                # Se for Gestão, agrupa também somando o custo total financeiro
+                                if st.session_state.perfil == "GESTAO":
+                                    df_consolidado = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
+                                    df_consolidado.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]
+                                    df_consolidado["Custo Total (R$)"] = df_consolidado["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                else:
+                                    df_consolidado = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                                    df_consolidado.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
                                 
                                 st.dataframe(df_consolidado, use_container_width=True, hide_index=True)
                                 
                                 st.markdown("#### 📊 Gráfico de Consumo por Material")
-                                df_grafico = df_consolidado.set_index("Material")["Quantidade Total Solicitada"]
+                                df_grafico = df_rel.groupby("material")["quantidade"].sum()
                                 st.bar_chart(df_grafico)
                                 
                                 csv = df_consolidado.to_csv(index=False).encode('utf-8')
@@ -435,22 +457,25 @@ with aba2:
                                 cat_escolhida = st.selectbox("Selecione a Categoria Desejada", cat_disponiveis, key="cat_escolhida_sel")
                                 
                                 df_cat_filtrado = df_rel[df_rel["categoria"] == cat_escolhida]
-                                df_cat_cons = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
-                                df_cat_cons.columns = ["Material", "Quantidade Total Solicitada"]
+                                
+                                if st.session_state.perfil == "GESTAO":
+                                    df_cat_cons = df_cat_filtrado.groupby("material").agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
+                                    df_cat_cons.columns = ["Material", "Quantidade Total", "Custo Total (R$)"]
+                                    df_cat_cons["Custo Total (R$)"] = df_cat_cons["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                else:
+                                    df_cat_cons = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
+                                    df_cat_cons.columns = ["Material", "Quantidade Total Solicitada"]
                                 
                                 st.write(f"**Consolidado da Categoria: {cat_escolhida} | Unidade(s): {ubs_escolhida}**")
                                 st.dataframe(df_cat_cons, use_container_width=True, hide_index=True)
                                 
                                 st.markdown(f"#### 📊 Gráfico de Consumo - {cat_escolhida}")
-                                df_grafico_cat = df_cat_cons.set_index("Material")["Quantidade Total Solicitada"]
+                                df_grafico_cat = df_cat_filtrado.groupby("material")["quantidade"].sum()
                                 st.bar_chart(df_grafico_cat)
                                 
                                 csv = df_cat_cons.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv", key="dl_cat")
 
-                    # ==========================================
-                    # VISÃO 3: EMITIR RELATÓRIO OFICIAL COM PARECER TÉCNICO
-                    # ==========================================
                     else:
                         st.write("### 🖨️ Emissão de Relatório Oficial e Parecer Técnico")
                         
@@ -478,7 +503,6 @@ with aba2:
                         elif periodo_imp == "Ano Atual":
                             df_imp = df_imp[df_imp['data_dt'].dt.year == agora.year]
 
-                        # Se escolhido por categoria, exibe seletor específico
                         cat_escolhida_imp = None
                         if tipo_imp_oficial == "Por Categoria":
                             if not df_imp.empty:
@@ -492,17 +516,26 @@ with aba2:
                             st.warning("⚠️ Nenhum registro encontrado para gerar este relatório oficial com os filtros selecionados.")
                         else:
                             if tipo_imp_oficial == "Consolidado Geral":
-                                df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
-                                df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
+                                if st.session_state.perfil == "GESTAO":
+                                    df_rel_final = df_imp.groupby(["categoria", "material"]).agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
+                                    df_rel_final.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]
+                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                else:
+                                    df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                                    df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
                                 titulo_rel_oficial = "Relatório Oficial Consolidado Geral de Insumos - SisPAC"
                             else:
-                                df_rel_final = df_imp.groupby(["material"])["quantidade"].sum().reset_index()
-                                df_rel_final.columns = ["Material", "Quantidade Total"]
+                                if st.session_state.perfil == "GESTAO":
+                                    df_rel_final = df_imp.groupby("material").agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
+                                    df_rel_final.columns = ["Material", "Quantidade Total", "Custo Total (R$)"]
+                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                else:
+                                    df_rel_final = df_imp.groupby(["material"])["quantidade"].sum().reset_index()
+                                    df_rel_final.columns = ["Material", "Quantidade Total"]
                                 titulo_rel_oficial = f"Relatório Oficial por Categoria ({cat_escolhida_imp}) - SisPAC"
 
                             df_rel_final = df_rel_final.sort_values(by="Quantidade Total", ascending=False).reset_index(drop=True)
 
-                            # --- DOCUMENTO OFICIAL FORMATADO PARA IMPRESSÃO ---
                             st.markdown(f"""
                             <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
@@ -518,7 +551,8 @@ with aba2:
                             st.write(f"**1. Relação de Itens Solicitados:**")
                             st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
                             
-                            # --- GERAÇÃO AUTOMÁTICA DO PARECER TÉCNICO ADAPTADO ---
+                            # Cálculo financeiro global para o parecer técnico (apenas para Gestão)
+                            custo_global_periodo = df_imp["custo_total"].sum() if "custo_total" in df_imp.columns else 0.0
                             total_itens_diferentes = len(df_rel_final)
                             total_geral_pecas = df_rel_final["Quantidade Total"].sum()
                             material_destaque = df_rel_final.iloc[0]["Material"] if not df_rel_final.empty else "N/A"
@@ -526,13 +560,22 @@ with aba2:
                             
                             escopo_texto = f"categoria <b>{cat_escolhida_imp}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
                             
-                            parecer_tecnico = (
-                                f"O presente documento consubstancia o relatório gerencial de requisição de insumos referente ao {escopo_texto} "
-                                f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
-                                f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
-                                f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
-                                f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques pelo Almoxarifado Central."
-                            )
+                            if st.session_state.perfil == "GESTAO":
+                                parecer_tecnico = (
+                                    f"O presente documento consubstancia o relatório gerencial e financeiro de requisição de insumos referente ao {escopo_texto} "
+                                    f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                                    f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas (englobando <b>{total_itens_diferentes} itens distintos</b>), "
+                                    f"representando um **custo total estimado de R$ {custo_global_periodo:.2f}** para o centro de custos. "
+                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
+                                    f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques e dotações pelo Almoxarifado Central."
+                                )
+                            else:
+                                parecer_tecnico = (
+                                    f"O presente documento consubstancia o relatório gerencial de requisição de insumos referente ao {escopo_texto} "
+                                    f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                                    f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
+                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas."
+                                )
 
                             st.markdown("<br>", unsafe_allow_html=True)
                             st.write("**2. Parecer Técnico / Administrativo Preliminar:**")
@@ -552,6 +595,5 @@ with aba2:
                             if st.button("🖨️ Imprimir ou Salvar Relatório Oficial em PDF", key="btn_print_rel_oficial"):
                                 st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
-        
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
