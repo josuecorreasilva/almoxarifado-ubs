@@ -210,14 +210,14 @@ with aba1:
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
         st.session_state.carrinho.append({
-            "distrito": distrito_selecionado, 
-            "ubs": ubs_selecionada,
-            "categoria": categoria_selecionada,
-            "material": material,
-            "quantidade": quantidade,
-            "valor_unitario": valor_unitario_atual,
-            "subtotal": subtotal
-        })
+            "distrito": distrito_selecionado,
+    "ubs": ubs_selecionada,
+    "categoria": categoria_selecionada,
+    "material": material,
+    "quantidade": quantidade,
+    "valor_unitario": valor_unitario_atual, # <-- É esta variável que está a vir a zero!
+    "subtotal": subtotal
+})
         st.success(f"Adicionado: {quantidade}x {material}")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
