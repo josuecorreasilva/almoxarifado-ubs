@@ -1,4 +1,7 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime, date
+import time
 
 # --- MENU DE NAVEGAÇÃO INTERNO NA BARRA LATERAL ---
 st.sidebar.title("Navegação do Sistema")
@@ -7,17 +10,17 @@ modo_sistema = st.sidebar.radio(
     ["SisPAC Oficial (Google Sheets)", "Módulo Experimental (Supabase)"]
 )
 
+# Se o utilizador escolher o Módulo do Supabase, o script para aqui e exibe só este bloco
 if modo_sistema == "Módulo Experimental (Supabase)":
-    st.info("Você está acessando o ambiente de testes com o Supabase.")
-    # Aqui você pode carregar o código do Supabase direto, ou chamar o script da pasta pages
-    st.stop  # Para a execução do app.py principal para não misturar as telas
+    st.title("📦 Laboratório - Supabase")
+    st.info("Você está acessando o ambiente de testes integrado ao Supabase.")
+    
+    # [Cole aqui o código específico da sua versão do Supabase]
+    
+    st.stop()  # <--- Note os parênteses obrigatórios aqui! Isto impede que a versão do Sheets misture-se com esta.
 
-import streamlit as st
-import pandas as pd
-import time
-from datetime import datetime
-from supabase import create_client, Client
-
+# --- A PARTIR DAQUI SEGUE O SEU CÓDIGO OFICIAL (Google Sheets) ---
+# (As configurações oficiais de página, conexão com o Sheets e formulários que você já usa)
 # ==========================================
 # 1. CONFIGURAÇÕES INICIAIS
 # ==========================================
