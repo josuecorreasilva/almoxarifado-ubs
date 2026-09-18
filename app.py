@@ -221,11 +221,14 @@ with aba1:
         if col_preco and not item_row.empty:
             val_raw = item_row[col_preco].values[0]
             try:
-                if isinstance(val_raw, str):
-                    val_raw = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
+            if isinstance(val_raw, str):
+                # Remove R$, espaços e ajusta o formato brasileiro (vírgula para ponto)
+                val_limpo = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
+                valor_unitario_atual = float(val_limpo)
+            else:
                 valor_unitario_atual = float(val_raw)
-            except:
-                valor_unitario_atual = 0.0
+        except:
+            valor_unitario_atual = 0.0
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
