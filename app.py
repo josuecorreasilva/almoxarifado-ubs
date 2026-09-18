@@ -293,9 +293,19 @@ with aba2:
                 if df_supabase.empty:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
+                    # Opções do Painel (Adicionada a visão específica de Centro de Custos para a Gestão)
+                    opcoes_visao = [
+                        "📋 Acompanhar Pedidos e Comprovantes", 
+                        "📈 Relatórios Analíticos e Gráficos", 
+                        "🖨️ Emitir Relatório Oficial (Imprimir)"
+                    ]
+                    
+                    if st.session_state.perfil == "GESTAO":
+                        opcoes_visao.insert(1, "💰 Centro de Custos e Orçamento")
+
                     modo_aba2 = st.radio(
                         "Escolha a visualização:", 
-                        ["📋 Acompanhar Pedidos e Comprovantes", "📈 Relatórios Analíticos e Gráficos", "🖨️ Emitir Relatório Oficial (Imprimir)"],
+                        opcoes_visao,
                         horizontal=True,
                         key="radio_modo_aba2"
                     )
@@ -350,36 +360,37 @@ with aba2:
                                 """, unsafe_allow_html=True)
 
                             st.markdown("<br>", unsafe_allow_html=True)
-                            st.write("**Relação de Itens Solicitados (Separados por Categoria):**")
+                            st.write("**Relação de Itens Solicitados (Separados por Categoria e Subtotais):**")
                             
                             categorias_presentes = detalhes["categoria"].unique()
-                            custo_total_comprovante = 0.0
+                            custo_total_pedido = 0.0
 
                             for cat in categorias_presentes:
-                                st.markdown(f"<p style='margin-bottom: 5px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
-                                
                                 df_cat_raw = detalhes[detalhes["categoria"] == cat]
                                 
-                                # Se for GESTÃO, exibe colunas financeiras. Se for UBS, exibe apenas Material e Qtd.
+                                # Se for GESTÃO, exibe colunas financeiras e o subtotal da categoria
                                 if st.session_state.perfil == "GESTAO":
+                                    custo_cat = df_cat_raw["custo_total"].sum()
+                                    custo_total_pedido += custo_cat
+                                    
+                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b> <span style='float: right; color: #16a085;'>Subtotal Categoria: R$ {custo_cat:.2f}</span></p>", unsafe_allow_html=True)
+                                    
                                     df_cat = df_cat_raw[["material", "quantidade", "valor_unitario", "custo_total"]].copy()
                                     df_cat.columns = ["Material", "Qtd", "Valor Unitário (R$)", "Custo Total (R$)"]
-                                    # Formata para exibição em moeda
                                     df_cat["Valor Unitário (R$)"] = df_cat["Valor Unitário (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
                                     df_cat["Custo Total (R$)"] = df_cat["Custo Total (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
-                                    
-                                    custo_total_comprovante += df_cat_raw["custo_total"].sum()
                                 else:
+                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
                                     df_cat = df_cat_raw[["material", "quantidade"]].rename(columns={"material": "Material", "quantidade": "Qtd"})
                                 
                                 st.dataframe(df_cat, use_container_width=True, hide_index=True)
                                 st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
                             
-                            # Exibe o custo total do pedido apenas para a Gestão
+                            # Exibe o custo total global do pedido exclusivamente para a Gestão
                             if st.session_state.perfil == "GESTAO":
                                 st.markdown(f"""
-                                <div style="padding: 10px; background-color: #f8f9fa; border-left: 4px solid #28a745; margin-bottom: 15px;">
-                                    <b>💰 Custo Total deste Pedido (Centro de Custos):</b> R$ {custo_total_comprovante:.2f}
+                                <div style="padding: 12px; background-color: #e8f8f5; border: 1px solid #1abc9c; border-left: 6px solid #16a085; border-radius: 4px; margin-top: 15px; margin-bottom: 15px;">
+                                    <span style="color: #117a65; font-size: 16px; font-weight: bold;">💰 Custo Total deste Pedido (Centro de Custos): R$ {custo_total_pedido:.2f}</span>
                                 </div>
                                 """, unsafe_allow_html=True)
 
@@ -397,6 +408,51 @@ with aba2:
 
                                 st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+
+                    elif modo_aba2 == "💰 Centro de Custos e Orçamento":
+                        st.write("### 💰 Gestão de Centro de Custos por Unidade e Categoria")
+                        st.markdown("Acompanhamento financeiro dos insumos requisitados pelas unidades da rede de atenção primária.")
+                        
+                        col_cc1, col_cc2 = st.columns(2)
+                        with col_cc1:
+                            filtro_ubs_cc = st.selectbox("Filtrar por UBS", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="cc_ubs")
+                        with col_cc2:
+                            filtro_cat_cc = st.selectbox("Filtrar por Categoria", ["Todas as Categorias"] + list(df_supabase['categoria'].unique()), key="cc_cat")
+
+                        df_cc = df_supabase.copy()
+                        if filtro_ubs_cc != "Todas as UBS":
+                            df_cc = df_cc[df_cc['ubs'] == filtro_ubs_cc]
+                        if filtro_cat_cc != "Todas as Categorias":
+                            df_cc = df_cc[df_cc['categoria'] == filtro_cat_cc]
+
+                        if df_cc.empty:
+                            st.warning("⚠️ Nenhum registro financeiro encontrado para os filtros aplicados.")
+                        else:
+                            # Indicadores principais do Centro de Custos
+                            custo_geral_acumulado = df_cc['custo_total'].sum()
+                            total_pedidos_filtro = df_cc['numero_pedido'].nunique()
+                            
+                            m1, m2 = st.columns(2)
+                            m1.metric("Custo Total Acumulado", f"R$ {custo_geral_acumulado:.2f}")
+                            m2.metric("Total de Pedidos no Período", total_pedidos_filtro)
+                            
+                            st.markdown("---")
+                            st.write("#### 📊 Custo Consolidado por Unidade Básica de Saúde (UBS)")
+                            df_por_ubs = df_cc.groupby('ubs')['custo_total'].sum().reset_index()
+                            df_por_ubs.columns = ["Unidade (UBS)", "Custo Total (R$)"]
+                            df_por_ubs = df_por_ubs.sort_values(by="Custo Total (R$)", ascending=False).reset_index(drop=True)
+                            df_por_ubs["Custo Total (R$)"] = df_por_ubs["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                            st.dataframe(df_por_ubs, use_container_width=True, hide_index=True)
+
+                            st.markdown("#### 📂 Custo Consolidado por Categoria de Insumo")
+                            df_por_cat = df_cc.groupby('categoria')['custo_total'].sum().reset_index()
+                            df_por_cat.columns = ["Categoria", "Custo Total (R$)"]
+                            df_por_cat = df_por_cat.sort_values(by="Custo Total (R$)", ascending=False).reset_index(drop=True)
+                            df_por_cat["Custo Total (R$)"] = df_por_cat["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                            st.dataframe(df_por_cat, use_container_width=True, hide_index=True)
+
+                            csv_cc = df_cc.to_csv(index=False).encode('utf-8')
+                            st.download_button("📥 Baixar Dados Completos do Centro de Custos (CSV)", data=csv_cc, file_name="centro_de_custos_sispac.csv", mime="text/csv", key="dl_cc")
 
                     elif modo_aba2 == "📈 Relatórios Analíticos e Gráficos":
                         st.write("### 📈 Painel Analítico e Gráficos de Consumo")
@@ -434,7 +490,6 @@ with aba2:
                             if tipo_relatorio == "Geral (Consolidado)":
                                 st.write(f"**Consolidado Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
                                 
-                                # Se for Gestão, agrupa também somando o custo total financeiro
                                 if st.session_state.perfil == "GESTAO":
                                     df_consolidado = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
                                     df_consolidado.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]
@@ -551,7 +606,6 @@ with aba2:
                             st.write(f"**1. Relação de Itens Solicitados:**")
                             st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
                             
-                            # Cálculo financeiro global para o parecer técnico (apenas para Gestão)
                             custo_global_periodo = df_imp["custo_total"].sum() if "custo_total" in df_imp.columns else 0.0
                             total_itens_diferentes = len(df_rel_final)
                             total_geral_pecas = df_rel_final["Quantidade Total"].sum()
@@ -566,8 +620,7 @@ with aba2:
                                     f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
                                     f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas (englobando <b>{total_itens_diferentes} itens distintos</b>), "
                                     f"representando um **custo total estimado de R$ {custo_global_periodo:.2f}** para o centro de custos. "
-                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas. "
-                                    f"O fluxo atende aos parâmetros operacionais vigentes, recomendando-se o acompanhamento contínuo dos estoques e dotações pelo Almoxarifado Central."
+                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas."
                                 )
                             else:
                                 parecer_tecnico = (
