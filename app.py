@@ -167,23 +167,22 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-    # Consulta o saldo atual do estoque diretamente da coluna "Estoque" do Google Sheets
+    # Consulta o saldo atual no estoque central do Supabase para o material selecionado
     estoque_disponivel_total = 0
-    if not df_materiais.empty and "Estoque" in df_materiais.columns and material:
-        item_row = df_materiais[df_materiais["Material"] == material]
-        if not item_row.empty:
-            try:
-                val_estoque = item_row["Estoque"].values[0]
-                estoque_disponivel_total = int(float(str(val_estoque).replace(",", ".")))
-            except:
-                estoque_disponivel_total = 0
+    if supabase and material:
+        try:
+            res_est = supabase.table("estoque_central").select("quantidade_atual").eq("material", material).execute()
+            if res_est.data:
+                estoque_disponivel_total = sum(int(item.get("quantidade_atual", 0)) for item in res_est.data)
+        except:
+            estoque_disponivel_total = 0
 
     # Indicador visual de disponibilidade para a UBS
     with col2:
         if estoque_disponivel_total > 50:
             st.markdown(f"**Estoque:** <span style='color: green;'>🟢 Disponível ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
         elif estoque_disponivel_total > 0:
-            st.markdown(f"**Estoque:** <span style='color: orange;'>🟠 Baixo ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
+            st.markdown(f"**Estoque:** <span style='color: orange;'>🟡 Baixo ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
         else:
             st.markdown(f"**Estoque:** <span style='color: red;'>🔴 Ruptura / Zero</span>", unsafe_allow_html=True)
 
@@ -210,14 +209,14 @@ with aba1:
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
         st.session_state.carrinho.append({
-            "distrito": distrito_selecionado,
-    "ubs": ubs_selecionada,
-    "categoria": categoria_selecionada,
-    "material": material,
-    "quantidade": quantidade,
-    "valor_unitario": valor_unitario_atual, # <-- É esta variável que está a vir a zero!
-    "subtotal": subtotal
-})
+            "distrito": distrito_selecionado, 
+            "ubs": ubs_selecionada,
+            "categoria": categoria_selecionada,
+            "material": material,
+            "quantidade": quantidade,
+            "valor_unitario": valor_unitario_atual,
+            "subtotal": subtotal
+        })
         st.success(f"Adicionado: {quantidade}x {material}")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
