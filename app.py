@@ -168,10 +168,10 @@ with aba1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
     # Consulta o saldo atual no estoque central do Supabase para o material selecionado
-estoque_disponivel_total = 0
-if supabse and material:
-    try:
-        res_est = supabse.table("estoque_central").select("quant_atual")... # (ou algo parecido)
+    estoque_disponivel_total = 0
+    if supabase and material:
+        try:
+            res_est = supabase.table("estoque_central").select("quantidade_atual").eq("material", material).execute()
             if res_est.data:
                 estoque_disponivel_total = sum(int(item.get("quantidade_atual", 0)) for item in res_est.data)
         except:
