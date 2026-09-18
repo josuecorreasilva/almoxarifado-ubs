@@ -222,7 +222,7 @@ with aba1:
             val_raw = item_row[col_preco].values[0]
             
             try:
-        if isinstance(val_raw, str):
+            if isinstance(val_raw, str):
             # Remove R$, espaços e ajusta o formato brasileiro (vírgula para ponto)
             val_limpo = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
             valor_unitario_atual = float(val_limpo)
