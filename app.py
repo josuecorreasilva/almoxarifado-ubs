@@ -185,14 +185,18 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-    # Consulta o saldo atual no estoque central do Supabase para o material selecionado
+   # Consulta o saldo atual no estoque central baseado na planilha do Google Sheets
     estoque_disponivel_total = 0
-    if supabase and material:
-        try:
-            res_est = supabase.table("estoque_central").select("quantidade_atual").eq("material", material).execute()
-            if res_est.data:
-                estoque_disponivel_total = sum(int(item.get("quantidade_atual", 0)) for item in res_est.data)
-        except:
+    if not df_materiais.empty and "Material" in df_materiais.columns and "Estoque" in df_materiais.columns:
+        # Filtra a linha correspondente ao material selecionado
+        item_row = df_materiais[df_materiais["Material"] == material]
+        if not item_row.empty:
+            # Pega o valor da coluna 'Estoque' e converte para número de forma segura
+            val_estoque = item_row["Estoque"].values[0]
+            try:
+                estoque_disponivel_total = int(float(str(val_estoque).replace(',', '.')))
+            except:
+                estoque_disponivel_total = 0
             estoque_disponivel_total = 0
 
     # Indicador visual de disponibilidade para a UBS
