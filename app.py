@@ -280,11 +280,16 @@ with aba2:
                 df_supabase = pd.DataFrame(dados)
                 df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
                 
-                # Garante que as colunas de custo existem no DataFrame
+                # Garante que as colunas de custo existem e são numéricas
                 if 'valor_unitario' not in df_supabase.columns:
                     df_supabase['valor_unitario'] = 0.0
+                else:
+                    df_supabase['valor_unitario'] = pd.to_numeric(df_supabase['valor_unitario'], errors='coerce').fillna(0.0)
+                    
                 if 'custo_total' not in df_supabase.columns:
                     df_supabase['custo_total'] = 0.0
+                else:
+                    df_supabase['custo_total'] = pd.to_numeric(df_supabase['custo_total'], errors='coerce').fillna(0.0)
                 
                 if st.session_state.perfil == "UBS":
                     df_supabase = df_supabase[df_supabase['ubs'].str.lower() == st.session_state.ubs_nome.lower()]
@@ -293,7 +298,6 @@ with aba2:
                 if df_supabase.empty:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
-                    # Opções do Painel (Adicionada a visão específica de Centro de Custos para a Gestão)
                     opcoes_visao = [
                         "📋 Acompanhar Pedidos e Comprovantes", 
                         "📈 Relatórios Analíticos e Gráficos", 
@@ -368,17 +372,18 @@ with aba2:
                             for cat in categorias_presentes:
                                 df_cat_raw = detalhes[detalhes["categoria"] == cat]
                                 
-                                # Se for GESTÃO, exibe colunas financeiras e o subtotal da categoria
                                 if st.session_state.perfil == "GESTAO":
                                     custo_cat = df_cat_raw["custo_total"].sum()
                                     custo_total_pedido += custo_cat
                                     
-                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b> <span style='float: right; color: #16a085;'>Subtotal Categoria: R$ {custo_cat:.2f}</span></p>", unsafe_allow_html=True)
+                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b> <span style='float: right; color: #16a085;'>Subtotal Categoria: R$ {custo_cat:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + "</span></p>", unsafe_allow_html=True)
                                     
                                     df_cat = df_cat_raw[["material", "quantidade", "valor_unitario", "custo_total"]].copy()
                                     df_cat.columns = ["Material", "Qtd", "Valor Unitário (R$)", "Custo Total (R$)"]
-                                    df_cat["Valor Unitário (R$)"] = df_cat["Valor Unitário (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
-                                    df_cat["Custo Total (R$)"] = df_cat["Custo Total (R$)"].apply(lambda x: f"R$ {float(x):.2f}" if pd.notna(x) else "R$ 0.00")
+                                    
+                                    # Formatação segura padrão BR (R$ X.XXX,XX)
+                                    df_cat["Valor Unitário (R$)"] = df_cat["Valor Unitário (R$)"].apply(lambda x: f"R$ {float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(x) else "R$ 0,00")
+                                    df_cat["Custo Total (R$)"] = df_cat["Custo Total (R$)"].apply(lambda x: f"R$ {float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(x) else "R$ 0,00")
                                 else:
                                     st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
                                     df_cat = df_cat_raw[["material", "quantidade"]].rename(columns={"material": "Material", "quantidade": "Qtd"})
@@ -386,11 +391,11 @@ with aba2:
                                 st.dataframe(df_cat, use_container_width=True, hide_index=True)
                                 st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
                             
-                            # Exibe o custo total global do pedido exclusivamente para a Gestão
                             if st.session_state.perfil == "GESTAO":
+                                custo_total_str = f"R$ {custo_total_pedido:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                                 st.markdown(f"""
                                 <div style="padding: 12px; background-color: #e8f8f5; border: 1px solid #1abc9c; border-left: 6px solid #16a085; border-radius: 4px; margin-top: 15px; margin-bottom: 15px;">
-                                    <span style="color: #117a65; font-size: 16px; font-weight: bold;">💰 Custo Total deste Pedido (Centro de Custos): R$ {custo_total_pedido:.2f}</span>
+                                    <span style="color: #117a65; font-size: 16px; font-weight: bold;">💰 Custo Total deste Pedido (Centro de Custos): {custo_total_str}</span>
                                 </div>
                                 """, unsafe_allow_html=True)
 
@@ -410,67 +415,138 @@ with aba2:
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif modo_aba2 == "💰 Centro de Custos e Orçamento":
-                        st.write("### 💰 Gestão de Centro de Custos por Unidade e Categoria")
-                        st.markdown("Acompanhamento financeiro dos insumos requisitados pelas unidades da rede de atenção primária.")
+                        st.write("### 💰 Centro de Custos, Orçamento e Parecer Analítico")
+                        st.markdown("Acompanhamento financeiro integrado com filtros por Distrito e UBS, gráficos de consumo e emissão de parecer técnico.")
                         
-                        col_cc1, col_cc2 = st.columns(2)
-                        with col_cc1:
-                            filtro_ubs_cc = st.selectbox("Filtrar por UBS", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="cc_ubs")
-                        with col_cc2:
-                            filtro_cat_cc = st.selectbox("Filtrar por Categoria", ["Todas as Categorias"] + list(df_supabase['categoria'].unique()), key="cc_cat")
+                        # Filtros hierárquicos: Distrito -> UBS
+                        col_f1, col_f2, col_f3 = st.columns(3)
+                        with col_f1:
+                            lista_distritos_filtro = ["Todos os Distritos"] + list(distritos_ubs.keys())
+                            distrito_escolhido_cc = st.selectbox("Filtrar por Distrito", lista_distritos_filtro, key="cc_distrito")
+                        
+                        with col_f2:
+                            if distrito_escolhido_cc == "Todos os Distritos":
+                                lista_ubs_disponiveis = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
+                            else:
+                                lista_ubs_disponiveis = ["Todas as UBS"] + distritos_ubs.get(distrito_escolhido_cc, [])
+                            ubs_escolhida_cc = st.selectbox("Filtrar por UBS", lista_ubs_disponiveis, key="cc_ubs_filtro")
+                            
+                        with col_f3:
+                            periodo_cc = st.selectbox("Período de Análise", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="cc_periodo")
 
+                        # Aplicando os filtros no DataFrame
                         df_cc = df_supabase.copy()
-                        if filtro_ubs_cc != "Todas as UBS":
-                            df_cc = df_cc[df_cc['ubs'] == filtro_ubs_cc]
-                        if filtro_cat_cc != "Todas as Categorias":
-                            df_cc = df_cc[df_cc['categoria'] == filtro_cat_cc]
+                        if distrito_escolhido_cc != "Todos os Distritos":
+                            unidades_do_distrito = distritos_ubs.get(distrito_escolhido_cc, [])
+                            df_cc = df_cc[df_cc['ubs'].isin(unidades_do_distrito)]
+                            
+                        if ubs_escolhida_cc != "Todas as UBS":
+                            df_cc = df_cc[df_cc['ubs'] == ubs_escolhida_cc]
+                            
+                        agora = pd.Timestamp.now()
+                        if periodo_cc == "Última Semana (7 dias)":
+                            df_cc = df_cc[df_cc['data_dt'] >= (agora - pd.Timedelta(days=7))]
+                        elif periodo_cc == "Último Mês (30 dias)":
+                            df_cc = df_cc[df_cc['data_dt'] >= (agora - pd.Timedelta(days=30))]
+                        elif periodo_cc == "Ano Atual":
+                            df_cc = df_cc[df_cc['data_dt'].dt.year == agora.year]
+
+                        st.markdown("---")
 
                         if df_cc.empty:
                             st.warning("⚠️ Nenhum registro financeiro encontrado para os filtros aplicados.")
                         else:
-                            # Indicadores principais do Centro de Custos
                             custo_geral_acumulado = df_cc['custo_total'].sum()
                             total_pedidos_filtro = df_cc['numero_pedido'].nunique()
+                            total_pecas_cc = df_cc['quantidade'].sum()
                             
-                            m1, m2 = st.columns(2)
-                            m1.metric("Custo Total Acumulado", f"R$ {custo_geral_acumulado:.2f}")
-                            m2.metric("Total de Pedidos no Período", total_pedidos_filtro)
+                            custo_geral_str = f"R$ {custo_geral_acumulado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                            
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Custo Total Acumulado", custo_geral_str)
+                            m2.metric("Total de Pedidos", total_pedidos_filtro)
+                            m3.metric("Total de Peças Requisitadas", int(total_pecas_cc))
                             
                             st.markdown("---")
-                            st.write("#### 📊 Custo Consolidado por Unidade Básica de Saúde (UBS)")
-                            df_por_ubs = df_cc.groupby('ubs')['custo_total'].sum().reset_index()
-                            df_por_ubs.columns = ["Unidade (UBS)", "Custo Total (R$)"]
-                            df_por_ubs = df_por_ubs.sort_values(by="Custo Total (R$)", ascending=False).reset_index(drop=True)
-                            df_por_ubs["Custo Total (R$)"] = df_por_ubs["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
-                            st.dataframe(df_por_ubs, use_container_width=True, hide_index=True)
+                            
+                            col_tab1, col_tab2 = st.columns(2)
+                            with col_tab1:
+                                st.write("#### 📊 Custo por Unidade (UBS)")
+                                df_por_ubs = df_cc.groupby('ubs')['custo_total'].sum().reset_index()
+                                df_por_ubs.columns = ["Unidade (UBS)", "Custo Total"]
+                                df_por_ubs = df_por_ubs.sort_values(by="Custo Total", ascending=False).reset_index(drop=True)
+                                df_por_ubs["Custo Total (R$)"] = df_por_ubs["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                st.dataframe(df_por_ubs[["Unidade (UBS)", "Custo Total (R$)"]], use_container_width=True, hide_index=True)
+                                
+                                st.markdown("##### Gráfico de Custos por UBS")
+                                st.bar_chart(df_por_ubs.set_index("Unidade (UBS)")["Custo Total"])
 
-                            st.markdown("#### 📂 Custo Consolidado por Categoria de Insumo")
-                            df_por_cat = df_cc.groupby('categoria')['custo_total'].sum().reset_index()
-                            df_por_cat.columns = ["Categoria", "Custo Total (R$)"]
-                            df_por_cat = df_por_cat.sort_values(by="Custo Total (R$)", ascending=False).reset_index(drop=True)
-                            df_por_cat["Custo Total (R$)"] = df_por_cat["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
-                            st.dataframe(df_por_cat, use_container_width=True, hide_index=True)
+                            with col_tab2:
+                                st.write("#### 📂 Custo por Categoria de Insumo")
+                                df_por_cat = df_cc.groupby('categoria')['custo_total'].sum().reset_index()
+                                df_por_cat.columns = ["Categoria", "Custo Total"]
+                                df_por_cat = df_por_cat.sort_values(by="Custo Total", ascending=False).reset_index(drop=True)
+                                df_por_cat["Custo Total (R$)"] = df_por_cat["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                st.dataframe(df_por_cat[["Categoria", "Custo Total (R$)"]], use_container_width=True, hide_index=True)
+                                
+                                st.markdown("##### Gráfico de Custos por Categoria")
+                                st.bar_chart(df_por_cat.set_index("Categoria")["Custo Total"])
 
+                            st.markdown("---")
+                            st.write("#### 📝 Parecer Técnico Orçamentário e Administrativo")
+                            
+                            material_top = df_cc.groupby("material")["quantidade"].sum().reset_index().sort_values(by="quantidade", ascending=False)
+                            nome_material_top = material_top.iloc[0]["material"] if not material_top.empty else "N/A"
+                            qtd_material_top = material_top.iloc[0]["quantidade"] if not material_top.empty else 0
+                            
+                            texto_escopo_cc = f"Distrito **{distrito_escolhido_cc}** / UBS **{ubs_escolhida_cc}**" if distrito_escolhido_cc != "Todos os Distritos" or ubs_escolhida_cc != "Todas as UBS" else "Rede de Atenção Primária (Consolidado Geral)"
+                            
+                            parecer_cc = (
+                                f"O presente demonstrativo consolida a execução orçamentária do centro de custos referente ao escopo: {texto_escopo_cc}, "
+                                f"abrangendo o período de **{periodo_cc}**. "
+                                f"Registrou-se um montante global estimado em **{custo_geral_str}**, distribuído em **{total_pedidos_filtro} pedidos** e totalizando **{int(total_pecas_cc)} unidades** de insumos movimentadas. "
+                                f"Evidencia-se maior expressividade financeira e de volume no item **{nome_material_top}** (com **{int(qtd_material_top)} unidades** requisitadas). "
+                                f"A gestão orçamentária permanece dentro dos parâmetros previstos, recomendando-se a continuidade do monitoramento regular de consumo por unidade."
+                            )
+                            
+                            st.markdown(f"""
+                            <div style="border: 1px solid #16a085; padding: 15px; border-radius: 6px; background-color: #f4fcfb;">
+                                <p style="text-align: justify; color: #2c3e50; font-size: 14px; line-height: 1.6; margin: 0;">
+                                    {parecer_cc}
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown("<br>", unsafe_allow_html=True)
                             csv_cc = df_cc.to_csv(index=False).encode('utf-8')
                             st.download_button("📥 Baixar Dados Completos do Centro de Custos (CSV)", data=csv_cc, file_name="centro_de_custos_sispac.csv", mime="text/csv", key="dl_cc")
 
                     elif modo_aba2 == "📈 Relatórios Analíticos e Gráficos":
                         st.write("### 📈 Painel Analítico e Gráficos de Consumo")
                         
-                        col_r1, col_r2, col_r3 = st.columns(3)
+                        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
                         with col_r1:
-                            tipo_relatorio = st.selectbox("Tipo de Relatório", ["Geral (Consolidado)", "Por Categoria"], key="tr_analitico")
+                            tipo_relatorio = st.selectbox("Tipo", ["Geral (Consolidado)", "Por Categoria"], key="tr_analitico")
                         with col_r2:
                             periodo = st.selectbox("Período", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="per_analitico")
                         with col_r3:
+                            lista_dist_rel = ["Todos os Distritos"] + list(distritos_ubs.keys())
+                            dist_rel_esc = st.selectbox("Distrito", lista_dist_rel, key="dist_rel_filtro")
+                        with col_r4:
                             if st.session_state.perfil == "GESTAO":
-                                lista_ubs_filtro = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
-                                ubs_escolhida = st.selectbox("Filtrar Unidade", lista_ubs_filtro, key="ubs_analitico_gestao")
+                                if dist_rel_esc == "Todos os Distritos":
+                                    ubs_list_rel = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
+                                else:
+                                    ubs_list_rel = ["Todas as UBS"] + distritos_ubs.get(dist_rel_esc, [])
+                                ubs_escolhida = st.selectbox("UBS", ubs_list_rel, key="ubs_analitico_gestao")
                             else:
                                 ubs_escolhida = st.session_state.ubs_nome
-                                st.text_input("Filtrar Unidade", value=ubs_escolhida, disabled=True, key="ubs_analitico_ubs")
+                                st.text_input("UBS", value=ubs_escolhida, disabled=True, key="ubs_analitico_ubs")
 
                         df_rel = df_supabase.copy()
+                        if dist_rel_esc != "Todos os Distritos":
+                            unidades_d_rel = distritos_ubs.get(dist_rel_esc, [])
+                            df_rel = df_rel[df_rel['ubs'].isin(unidades_d_rel)]
                         if st.session_state.perfil == "GESTAO" and ubs_escolhida != "Todas as UBS":
                             df_rel = df_rel[df_rel['ubs'] == ubs_escolhida]
                             
@@ -488,23 +564,24 @@ with aba2:
                             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
                         else:
                             if tipo_relatorio == "Geral (Consolidado)":
-                                st.write(f"**Consolidado Geral - Unidade(s): {ubs_escolhida} ({periodo})**")
+                                st.write(f"**Consolidado Geral - Escopo: {ubs_escolhida} ({periodo})**")
                                 
                                 if st.session_state.perfil == "GESTAO":
                                     df_consolidado = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
-                                    df_consolidado.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]
-                                    df_consolidado["Custo Total (R$)"] = df_consolidado["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                    df_consolidado.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total"]
+                                    df_consolidado["Custo Total (R$)"] = df_consolidado["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                    df_exibicao = df_consolidado[["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]]
                                 else:
-                                    df_consolidado = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
-                                    df_consolidado.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
+                                    df_exibicao = df_rel.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
+                                    df_exibicao.columns = ["Categoria", "Material", "Quantidade Total Solicitada"]
                                 
-                                st.dataframe(df_consolidado, use_container_width=True, hide_index=True)
+                                st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
                                 
                                 st.markdown("#### 📊 Gráfico de Consumo por Material")
                                 df_grafico = df_rel.groupby("material")["quantidade"].sum()
                                 st.bar_chart(df_grafico)
                                 
-                                csv = df_consolidado.to_csv(index=False).encode('utf-8')
+                                csv = df_exibicao.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório em CSV", data=csv, file_name="relatorio_geral_materiais.csv", mime="text/csv", key="dl_geral")
                                 
                             else:
@@ -515,38 +592,49 @@ with aba2:
                                 
                                 if st.session_state.perfil == "GESTAO":
                                     df_cat_cons = df_cat_filtrado.groupby("material").agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
-                                    df_cat_cons.columns = ["Material", "Quantidade Total", "Custo Total (R$)"]
-                                    df_cat_cons["Custo Total (R$)"] = df_cat_cons["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                    df_cat_cons.columns = ["Material", "Quantidade Total", "Custo Total"]
+                                    df_cat_cons["Custo Total (R$)"] = df_cat_cons["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                    df_cat_ex = df_cat_cons[["Material", "Quantidade Total", "Custo Total (R$)"]]
                                 else:
-                                    df_cat_cons = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
-                                    df_cat_cons.columns = ["Material", "Quantidade Total Solicitada"]
+                                    df_cat_ex = df_cat_filtrado.groupby(["material"])["quantidade"].sum().reset_index()
+                                    df_cat_ex.columns = ["Material", "Quantidade Total Solicitada"]
                                 
-                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Unidade(s): {ubs_escolhida}**")
-                                st.dataframe(df_cat_cons, use_container_width=True, hide_index=True)
+                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Escopo: {ubs_escolhida}**")
+                                st.dataframe(df_cat_ex, use_container_width=True, hide_index=True)
                                 
                                 st.markdown(f"#### 📊 Gráfico de Consumo - {cat_escolhida}")
                                 df_grafico_cat = df_cat_filtrado.groupby("material")["quantidade"].sum()
                                 st.bar_chart(df_grafico_cat)
                                 
-                                csv = df_cat_cons.to_csv(index=False).encode('utf-8')
+                                csv = df_cat_ex.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv", key="dl_cat")
 
                     else:
                         st.write("### 🖨️ Emissão de Relatório Oficial e Parecer Técnico")
                         
-                        col_e1, col_e2, col_e3 = st.columns(3)
+                        col_e1, col_e2, col_e3, col_e4 = st.columns(4)
                         with col_e1:
-                            tipo_imp_oficial = st.selectbox("Formato do Relatório", ["Consolidado Geral", "Por Categoria"], key="tipo_imp_oficial")
+                            tipo_imp_oficial = st.selectbox("Formato", ["Consolidado Geral", "Por Categoria"], key="tipo_imp_oficial")
                         with col_e2:
-                            periodo_imp = st.selectbox("Período de Impressão", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp_oficial")
+                            periodo_imp = st.selectbox("Período", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="p_imp_oficial")
                         with col_e3:
+                            lista_dist_imp = ["Todos os Distritos"] + list(distritos_ubs.keys())
+                            dist_imp_esc = st.selectbox("Distrito", lista_dist_imp, key="dist_imp_filtro")
+                        with col_e4:
                             if st.session_state.perfil == "GESTAO":
-                                ubs_imp = st.selectbox("Unidade Referência", ["Todas as UBS"] + list(df_supabase['ubs'].unique()), key="u_imp_oficial")
+                                if dist_imp_esc == "Todos os Distritos":
+                                    ubs_list_imp = ["Todas as UBS"] + list(df_supabase['ubs'].unique())
+                                else:
+                                    ubs_list_imp = ["Todas as UBS"] + distritos_ubs.get(dist_imp_esc, [])
+                                ubs_imp = st.selectbox("Unidade", ubs_list_imp, key="u_imp_oficial")
                             else:
                                 ubs_imp = st.session_state.ubs_nome
-                                st.text_input("Unidade Referência", value=ubs_imp, disabled=True, key="u_imp_lock_oficial")
+                                st.text_input("Unidade", value=ubs_imp, disabled=True, key="u_imp_lock_oficial")
 
                         df_imp = df_supabase.copy()
+                        if dist_imp_esc != "Todos os Distritos":
+                            unidades_d_imp = distritos_ubs.get(dist_imp_esc, [])
+                            df_imp = df_imp[df_imp['ubs'].isin(unidades_d_imp)]
                         if st.session_state.perfil == "GESTAO" and ubs_imp != "Todas as UBS":
                             df_imp = df_imp[df_imp['ubs'] == ubs_imp]
                             
@@ -573,8 +661,9 @@ with aba2:
                             if tipo_imp_oficial == "Consolidado Geral":
                                 if st.session_state.perfil == "GESTAO":
                                     df_rel_final = df_imp.groupby(["categoria", "material"]).agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
-                                    df_rel_final.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]
-                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                    df_rel_final.columns = ["Categoria", "Material", "Quantidade Total", "Custo Total"]
+                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                    df_rel_final = df_rel_final[["Categoria", "Material", "Quantidade Total", "Custo Total (R$)"]]
                                 else:
                                     df_rel_final = df_imp.groupby(["categoria", "material"])["quantidade"].sum().reset_index()
                                     df_rel_final.columns = ["Categoria", "Material", "Quantidade Total"]
@@ -582,8 +671,9 @@ with aba2:
                             else:
                                 if st.session_state.perfil == "GESTAO":
                                     df_rel_final = df_imp.groupby("material").agg({"quantidade": "sum", "custo_total": "sum"}).reset_index()
-                                    df_rel_final.columns = ["Material", "Quantidade Total", "Custo Total (R$)"]
-                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total (R$)"].apply(lambda x: f"R$ {x:.2f}")
+                                    df_rel_final.columns = ["Material", "Quantidade Total", "Custo Total"]
+                                    df_rel_final["Custo Total (R$)"] = df_rel_final["Custo Total"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                                    df_rel_final = df_rel_final[["Material", "Quantidade Total", "Custo Total (R$)"]]
                                 else:
                                     df_rel_final = df_imp.groupby(["material"])["quantidade"].sum().reset_index()
                                     df_rel_final.columns = ["Material", "Quantidade Total"]
@@ -596,7 +686,7 @@ with aba2:
                                 <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
                                 <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{titulo_rel_oficial}</h4>
                                 <hr style="border: 0.5px solid #ccc;">
-                                <p style="margin: 5px 0;"><b>Unidade / Escopo:</b> {ubs_imp}</p>
+                                <p style="margin: 5px 0;"><b>Distrito / Unidade:</b> {dist_imp_esc} / {ubs_imp}</p>
                                 <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
                                 <p style="margin: 5px 0;"><b>Data de Emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
                             </div>
@@ -607,6 +697,7 @@ with aba2:
                             st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
                             
                             custo_global_periodo = df_imp["custo_total"].sum() if "custo_total" in df_imp.columns else 0.0
+                            custo_global_str = f"R$ {custo_global_periodo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                             total_itens_diferentes = len(df_rel_final)
                             total_geral_pecas = df_rel_final["Quantidade Total"].sum()
                             material_destaque = df_rel_final.iloc[0]["Material"] if not df_rel_final.empty else "N/A"
@@ -617,17 +708,17 @@ with aba2:
                             if st.session_state.perfil == "GESTAO":
                                 parecer_tecnico = (
                                     f"O presente documento consubstancia o relatório gerencial e financeiro de requisição de insumos referente ao {escopo_texto} "
-                                    f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
-                                    f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas (englobando <b>{total_itens_diferentes} itens distintos</b>), "
-                                    f"representando um **custo total estimado de R$ {custo_global_periodo:.2f}** para o centro de custos. "
-                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas."
+                                    f"para o distrito/unidade (**{dist_imp_esc} / {ubs_imp}**), considerando o período de <b>{periodo_imp}</b>. "
+                                    f"Constatou-se a movimentação de <b>{int(total_geral_pecas)} unidades</b> solicitadas (englobando <b>{total_itens_diferentes} itens distintos</b>), "
+                                    f"representando um **custo total estimado de {custo_global_str}** para o centro de custos. "
+                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{int(qtd_destaque)} unidades</b> requisitadas."
                                 )
                             else:
                                 parecer_tecnico = (
                                     f"O presente documento consubstancia o relatório gerencial de requisição de insumos referente ao {escopo_texto} "
                                     f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
-                                    f"Constatou-se a movimentação de <b>{total_geral_pecas} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
-                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{qtd_destaque} unidades</b> requisitadas."
+                                    f"Constatou-se a movimentação de <b>{int(total_geral_pecas)} unidades</b> solicitadas, englobando <b>{total_itens_diferentes} itens distintos</b>. "
+                                    f"Evidencia-se maior proeminência no consumo do item <b>{material_destaque}</b>, com o patamar de <b>{int(qtd_destaque)} unidades</b> requisitadas."
                                 )
 
                             st.markdown("<br>", unsafe_allow_html=True)
