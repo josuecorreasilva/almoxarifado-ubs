@@ -167,38 +167,29 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-    # Consulta unificada: Puxa o Estoque e o Valor Unitário diretamente da mesma linha no Google Sheets
+    # Consulta o Estoque e o Valor Unitário diretamente da planilha padronizada
     estoque_disponivel_total = 0
     valor_unitario_atual = 0.0
 
     if not df_materiais.empty and material:
         item_row = df_materiais[df_materiais["Material"] == material]
         if not item_row.empty:
-            # 1. Leitura do Estoque direto da planilha do Google Sheets
+            # 1. Leitura do Estoque
             if "Estoque" in item_row.columns:
                 try:
-                    val_est = item_row["Estoque"].values[0]
-                    estoque_disponivel_total = int(float(str(val_est).replace(",", ".")))
+                    estoque_disponivel_total = int(float(str(item_row["Estoque"].values[0]).replace(",", ".")))
                 except:
                     estoque_disponivel_total = 0
 
-            # 2. Leitura do Valor Unitário direto da planilha do Google Sheets (procura variações comuns)
-            col_preco = next((c for c in ["Valor unitário", "Valor Unitário", "Valor Unitario", "Preço", "Preco"] if c in item_row.columns), None)
-            if col_preco:
-                val_raw = item_row[col_preco].values[0]
+            # 2. Leitura do Valor Unitário
+            if "Valor Unitário" in item_row.columns:
+                val_raw = item_row["Valor Unitário"].values[0]
                 try:
                     if pd.notna(val_raw):
-                        val_str = str(val_raw).replace("R$", "").replace(" ", "").strip()
-                        if "," in val_str and "." in val_str:
-                            val_str = val_str.replace(".", "").replace(",", ".")
-                        elif "," in val_str:
-                            val_str = val_str.replace(",", ".")
+                        val_str = str(val_raw).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
                         valor_unitario_atual = float(val_str)
                 except:
                     valor_unitario_atual = 0.0
-
-    with col2: # Ajuste de espaçamento visual
-        pass
 
     # Indicador visual de disponibilidade para a UBS
     with col2:
