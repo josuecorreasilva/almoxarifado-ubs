@@ -213,23 +213,22 @@ with aba1:
     with col3:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-    # Puxa o valor unitário da planilha silenciosamente em segundo plano
+    # Puxa o valor unitário e o estoque diretamente da planilha com segurança total
     valor_unitario_atual = 0.0
     if not df_materiais.empty and material:
         item_row = df_materiais[df_materiais["Material"] == material]
-        col_preco = next((c for c in ["Valor Unitario", "Valor Unitário", "Preço", "Preco"] if c in df_materiais.columns), None)
-        if col_preco and not item_row.empty:
-            val_raw = item_row[col_preco].values[0]
-            
-            try:
-                if isinstance(val_raw, str):
-                    # Remove R$, espaços e ajusta o formato brasileiro (vírgula para ponto)
-                    val_limpo = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
-                    valor_unitario_atual = float(val_limpo)
-                else:
-                    valor_unitario_atual = float(val_raw)
-            except:
-                valor_unitario_atual = 0.0
+        if not item_row.empty:
+            # Procura pela coluna de valor unitário com variações comuns
+            for col in ["Valor unitário", "Valor Unitário", "Valor_unitario", "Preço", "Preco"]:
+                if col in item_row.columns:
+                    val_raw = item_row[col].values[0]
+                    try:
+                        if pd.notna(val_raw):
+                            val_str = str(val_raw).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+                            valor_unitario_atual = float(val_str)
+                    except:
+                        valor_unitario_atual = 0.0
+                    break
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
