@@ -197,7 +197,6 @@ with aba1:
                 estoque_disponivel_total = int(float(str(val_estoque).replace(',', '.')))
             except:
                 estoque_disponivel_total = 0
-            estoque_disponivel_total = 0
 
     # Indicador visual de disponibilidade para a UBS
     with col2:
