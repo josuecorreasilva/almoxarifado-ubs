@@ -8,26 +8,8 @@ from supabase import create_client, Client
 # 1. CONFIGURAÇÕES INICIAIS
 # ==========================================
 # POR QUE: Define como a página vai aparecer na aba do navegador e usa a tela toda (layout wide)
-st.set_page_config(page_title="SisPAC - Sistema de Pedidos e Almoxarifado Central",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="wide")
 
-# --- ESTILO CSS PARA IMPRESSÃO LIMPA ---
-st.markdown("""
-<style>
-@media print {
-    /* Oculta a barra lateral, cabeçalhos, botões e menus de escolha na hora de imprimir/salvar PDF */
-    [data-testid="stSidebar"], header, button, .stRadio, .stSelectbox {
-        display: none !important;
-    }
-    .block-container {
-        padding-top: 0rem !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
 st.markdown("""
     <style>
     @media print {
@@ -185,18 +167,15 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-   # Consulta o saldo atual no estoque central baseado na planilha do Google Sheets
+    # Consulta o saldo atual no estoque central do Supabase para o material selecionado
     estoque_disponivel_total = 0
-    if not df_materiais.empty and "Material" in df_materiais.columns and "Estoque" in df_materiais.columns:
-        # Filtra a linha correspondente ao material selecionado
-        item_row = df_materiais[df_materiais["Material"] == material]
-        if not item_row.empty:
-            # Pega o valor da coluna 'Estoque' e converte para número de forma segura
-            val_estoque = item_row["Estoque"].values[0]
-            try:
-                estoque_disponivel_total = int(float(str(val_estoque).replace(',', '.')))
-            except:
-                estoque_disponivel_total = 0
+    if supabase and material:
+        try:
+            res_est = supabase.table("estoque_central").select("quantidade_atual").eq("material", material).execute()
+            if res_est.data:
+                estoque_disponivel_total = sum(int(item.get("quantidade_atual", 0)) for item in res_est.data)
+        except:
+            estoque_disponivel_total = 0
 
     # Indicador visual de disponibilidade para a UBS
     with col2:
@@ -213,22 +192,19 @@ with aba1:
     with col3:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-    # Puxa o valor unitário e o estoque diretamente da planilha com segurança total
+    # Puxa o valor unitário da planilha silenciosamente em segundo plano
     valor_unitario_atual = 0.0
     if not df_materiais.empty and material:
         item_row = df_materiais[df_materiais["Material"] == material]
-        if not item_row.empty:
-            # Procura pela coluna de valor unitário com variações comuns
-            for col in ["Valor unitário", "Valor Unitário", "Valor_unitario", "Preço", "Preco"]:
-                if col in item_row.columns:
-                    val_raw = item_row[col].values[0]
-                    try:
-                        if pd.notna(val_raw):
-                            val_str = str(val_raw).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
-                            valor_unitario_atual = float(val_str)
-                    except:
-                        valor_unitario_atual = 0.0
-                    break
+        col_preco = next((c for c in ["Valor Unitario", "Valor Unitário", "Preço", "Preco"] if c in df_materiais.columns), None)
+        if col_preco and not item_row.empty:
+            val_raw = item_row[col_preco].values[0]
+            try:
+                if isinstance(val_raw, str):
+                    val_raw = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
+                valor_unitario_atual = float(val_raw)
+            except:
+                valor_unitario_atual = 0.0
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         subtotal = quantidade * valor_unitario_atual
