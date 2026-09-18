@@ -8,8 +8,26 @@ from supabase import create_client, Client
 # 1. CONFIGURAÇÕES INICIAIS
 # ==========================================
 # POR QUE: Define como a página vai aparecer na aba do navegador e usa a tela toda (layout wide)
-st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="SisPAC - Sistema de Pedidos e Almoxarifado Central",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# --- ESTILO CSS PARA IMPRESSÃO LIMPA ---
+st.markdown("""
+<style>
+@media print {
+    /* Oculta a barra lateral, cabeçalhos, botões e menus de escolha na hora de imprimir/salvar PDF */
+    [data-testid="stSidebar"], header, button, .stRadio, .stSelectbox {
+        display: none !important;
+    }
+    .block-container {
+        padding-top: 0rem !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
 st.markdown("""
     <style>
     @media print {
