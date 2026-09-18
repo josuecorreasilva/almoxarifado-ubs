@@ -1,15 +1,3 @@
-# --- MENU DE NAVEGAÇÃO INTERNO NA BARRA LATERAL ---
-st.sidebar.title("Navegação do Sistema")
-modo_sistema = st.sidebar.radio(
-    "Escolha a Versão:",
-    ["SisPAC Oficial (Google Sheets)", "Módulo Experimental (Supabase)"]
-)
-
-if modo_sistema == "Módulo Experimental (Supabase)":
-    st.info("Você está acessando o ambiente de testes com o Supabase.")
-    # Aqui você pode carregar o código do Supabase direto, ou chamar o script da pasta pages
-    st.stop  # Para a execução do app.py principal para não misturar as telas
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
