@@ -167,15 +167,38 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-    # Consulta o saldo atual no estoque central do Supabase para o material selecionado
+    # Consulta unificada: Puxa o Estoque e o Valor Unitário diretamente da mesma linha no Google Sheets
     estoque_disponivel_total = 0
-    if supabase and material:
-        try:
-            res_est = supabase.table("estoque_central").select("quantidade_atual").eq("material", material).execute()
-            if res_est.data:
-                estoque_disponivel_total = sum(int(item.get("quantidade_atual", 0)) for item in res_est.data)
-        except:
-            estoque_disponivel_total = 0
+    valor_unitario_atual = 0.0
+
+    if not df_materiais.empty and material:
+        item_row = df_materiais[df_materiais["Material"] == material]
+        if not item_row.empty:
+            # 1. Leitura do Estoque direto da planilha do Google Sheets
+            if "Estoque" in item_row.columns:
+                try:
+                    val_est = item_row["Estoque"].values[0]
+                    estoque_disponivel_total = int(float(str(val_est).replace(",", ".")))
+                except:
+                    estoque_disponivel_total = 0
+
+            # 2. Leitura do Valor Unitário direto da planilha do Google Sheets (procura variações comuns)
+            col_preco = next((c for c in ["Valor unitário", "Valor Unitário", "Valor Unitario", "Preço", "Preco"] if c in item_row.columns), None)
+            if col_preco:
+                val_raw = item_row[col_preco].values[0]
+                try:
+                    if pd.notna(val_raw):
+                        val_str = str(val_raw).replace("R$", "").replace(" ", "").strip()
+                        if "," in val_str and "." in val_str:
+                            val_str = val_str.replace(".", "").replace(",", ".")
+                        elif "," in val_str:
+                            val_str = val_str.replace(",", ".")
+                        valor_unitario_atual = float(val_str)
+                except:
+                    valor_unitario_atual = 0.0
+
+    with col2: # Ajuste de espaçamento visual
+        pass
 
     # Indicador visual de disponibilidade para a UBS
     with col2:
@@ -185,9 +208,6 @@ with aba1:
             st.markdown(f"**Estoque:** <span style='color: orange;'>🟡 Baixo ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
         else:
             st.markdown(f"**Estoque:** <span style='color: red;'>🔴 Ruptura / Zero</span>", unsafe_allow_html=True)
-
-    with col2: # Ajuste de espaçamento visual
-        pass
 
     with col3:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
