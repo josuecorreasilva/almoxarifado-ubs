@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
+import unicodedata
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -44,6 +45,85 @@ distritos_ubs = {
 # POR QUE: Link para puxar a lista de materiais ao vivo do seu Google Sheets. 
 url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
 
+MATERIAIS_INVALIDOS = {"Erro", "Selecione Categoria", "Nenhuma", "Sem itens", ""}
+
+
+def normalizar_texto(texto):
+    texto = str(texto).lower().strip()
+    sem_acento = unicodedata.normalize("NFKD", texto)
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return sem_acento.replace(" ", "").replace("_", "").replace(".", "").replace("-", "")
+
+
+def identificar_ubs_por_email(email):
+    local = normalizar_texto(str(email).split("@")[0])
+    candidatos = []
+    for distrito, unidades in distritos_ubs.items():
+        for unidade in unidades:
+            nome_norm = normalizar_texto(unidade)
+            if nome_norm and nome_norm in local:
+                candidatos.append((len(nome_norm), distrito, unidade))
+    if candidatos:
+        candidatos.sort(reverse=True)
+        return candidatos[0][1], candidatos[0][2]
+    return "Não Encontrado", None
+
+
+def achar_coluna(df, aliases):
+    mapa = {str(c).strip().lower(): c for c in df.columns}
+    for alias in aliases:
+        chave = alias.strip().lower()
+        if chave in mapa:
+            return mapa[chave]
+    return None
+
+
+def parse_numero(valor, inteiro=False):
+    padrao = 0 if inteiro else 0.0
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return padrao
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        numero = float(valor)
+        return int(numero) if inteiro else numero
+
+    texto = str(valor).strip().replace("R$", "").replace("\xa0", "").replace(" ", "")
+    if texto == "" or texto.lower() in {"nan", "none", "-"}:
+        return padrao
+    if "," in texto and "." in texto:
+        if texto.rfind(",") > texto.rfind("."):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+    elif "," in texto:
+        texto = texto.replace(",", ".")
+    try:
+        numero = float(texto)
+        return int(numero) if inteiro else numero
+    except ValueError:
+        return padrao
+
+
+def status_consolidado_pedido(df_itens):
+    if df_itens is None or df_itens.empty or "status" not in df_itens.columns:
+        return "Pedido enviado"
+    statuses = set(df_itens["status"].dropna().astype(str))
+    if "Atendido Parcialmente" in statuses:
+        return "Atendido Parcialmente"
+    if statuses and statuses.issubset({"Atendido Integralmente"}):
+        return "Atendido Integralmente"
+    return str(df_itens["status"].iloc[0])
+
+
+@st.cache_data(ttl=300)
+def carregar_materiais(url):
+    df = pd.read_csv(url)
+    df.columns = df.columns.str.strip()
+    col_material = achar_coluna(df, ["Material"])
+    if col_material:
+        df[col_material] = df[col_material].astype(str).str.strip()
+    return df
+
+
 # ==========================================
 # 3. SISTEMA DE LOGIN E SEGURANÇA
 # ==========================================
@@ -72,13 +152,15 @@ if not st.session_state.autenticado:
                 st.session_state.email_usuario = resposta.user.email
                 
                 # Regra que define quem enxerga o que:
-                if "ubs" in st.session_state.email_usuario:
+                if "ubs" in st.session_state.email_usuario.lower():
                     st.session_state.perfil = "UBS"
-                    nome_limpo = email_digitado.split('@')[0].replace("ubs", "").replace("_", "").replace(".", "")
-                    st.session_state.ubs_nome = nome_limpo.capitalize()
+                    distrito_email, ubs_email = identificar_ubs_por_email(st.session_state.email_usuario)
+                    st.session_state.ubs_nome = ubs_email or st.session_state.email_usuario.split("@")[0]
+                    st.session_state.distrito_ubs = distrito_email
                 else:
                     st.session_state.perfil = "GESTAO"
                     st.session_state.ubs_nome = "Visão Global"
+                    st.session_state.distrito_ubs = None
                 
                 st.rerun() # Atualiza a tela para liberar o sistema
                 
@@ -129,12 +211,13 @@ with aba1:
         with col_ubs:
             ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
     else:
-        unidade_usuario = st.session_state.ubs_nome 
-        distrito_detectado = "Não Encontrado"
-        for distrito, unidades in distritos_ubs.items():
-            if unidade_usuario in unidades:
-                distrito_detectado = distrito
-                break
+        unidade_usuario = st.session_state.ubs_nome
+        distrito_detectado = st.session_state.get("distrito_ubs") or "Não Encontrado"
+        if distrito_detectado == "Não Encontrado":
+            for distrito, unidades in distritos_ubs.items():
+                if unidade_usuario in unidades:
+                    distrito_detectado = distrito
+                    break
                 
         with col_distrito:
             distrito_selecionado = st.selectbox("Distrito (Acesso Restrito)", [distrito_detectado], disabled=True)
@@ -142,21 +225,29 @@ with aba1:
             ubs_selecionada = st.selectbox("Unidade (Acesso Restrito)", [unidade_usuario], disabled=True)
             
     st.markdown("---")
+
+    if st.session_state.get("msg_pedido_ok"):
+        st.success(st.session_state.msg_pedido_ok)
+        st.session_state.msg_pedido_ok = None
     
     try:
-        df_materiais = pd.read_csv(url_google_sheets_materiais)
-        df_materiais.columns = df_materiais.columns.str.strip()
-        lista_categorias = df_materiais["Categoria"].dropna().unique().tolist()
-    except:
-        st.error("Erro ao carregar materiais. Verifique o link do Google Sheets.")
+        df_materiais = carregar_materiais(url_google_sheets_materiais)
+        col_categoria = achar_coluna(df_materiais, ["Categoria"])
+        col_material = achar_coluna(df_materiais, ["Material"])
+        col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
+        col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
+        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria else ["Erro"]
+    except Exception as e:
+        st.error(f"Erro ao carregar materiais. Verifique o link do Google Sheets. ({e})")
         lista_categorias = ["Erro"]
         df_materiais = pd.DataFrame()
+        col_categoria = col_material = col_estoque = col_preco = None
         
     categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
     
-    if not df_materiais.empty and "Categoria" in df_materiais.columns:
-         df_filtrado = df_materiais[df_materiais["Categoria"] == categoria_selecionada]
-         lista_de_itens = df_filtrado["Material"].dropna().tolist()
+    if not df_materiais.empty and col_categoria and col_material:
+         df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada]
+         lista_de_itens = df_filtrado[col_material].dropna().tolist()
     else:
          lista_de_itens = ["Selecione Categoria"]
          
@@ -167,31 +258,17 @@ with aba1:
     with col1:
         material = st.selectbox("2. Selecione o Material", lista_de_itens)
         
-    # Consulta o Estoque e o Valor Unitário diretamente da planilha padronizada
     estoque_disponivel_total = 0
     valor_unitario_atual = 0.0
 
-    if not df_materiais.empty and material:
-        item_row = df_materiais[df_materiais["Material"] == material]
+    if not df_materiais.empty and material and col_material:
+        item_row = df_materiais[df_materiais[col_material] == material]
         if not item_row.empty:
-            # 1. Leitura do Estoque
-            if "Estoque" in item_row.columns:
-                try:
-                    estoque_disponivel_total = int(float(str(item_row["Estoque"].values[0]).replace(",", ".")))
-                except:
-                    estoque_disponivel_total = 0
+            if col_estoque:
+                estoque_disponivel_total = parse_numero(item_row[col_estoque].values[0], inteiro=True)
+            if col_preco:
+                valor_unitario_atual = parse_numero(item_row[col_preco].values[0])
 
-            # 2. Leitura do Valor Unitário
-            if "Valor Unitário" in item_row.columns:
-                val_raw = item_row["Valor Unitário"].values[0]
-                try:
-                    if pd.notna(val_raw):
-                        val_str = str(val_raw).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
-                        valor_unitario_atual = float(val_str)
-                except:
-                    valor_unitario_atual = 0.0
-
-    # Indicador visual de disponibilidade para a UBS
     with col2:
         if estoque_disponivel_total > 50:
             st.markdown(f"**Estoque:** <span style='color: green;'>🟢 Disponível ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
@@ -203,32 +280,34 @@ with aba1:
     with col3:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
         
-    # Puxa o valor unitário da planilha silenciosamente em segundo plano
-    valor_unitario_atual = 0.0
-    if not df_materiais.empty and material:
-        item_row = df_materiais[df_materiais["Material"] == material]
-        col_preco = next((c for c in ["Valor Unitario", "Valor Unitário", "Preço", "Preco"] if c in df_materiais.columns), None)
-        if col_preco and not item_row.empty:
-            val_raw = item_row[col_preco].values[0]
-            try:
-                if isinstance(val_raw, str):
-                    val_raw = val_raw.replace("R$", "").strip().replace(".", "").replace(",", ".")
-                valor_unitario_atual = float(val_raw)
-            except:
-                valor_unitario_atual = 0.0
-        
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
-        subtotal = quantidade * valor_unitario_atual
-        st.session_state.carrinho.append({
-            "distrito": distrito_selecionado, 
-            "ubs": ubs_selecionada,
-            "categoria": categoria_selecionada,
-            "material": material,
-            "quantidade": quantidade,
-            "valor_unitario": valor_unitario_atual,
-            "subtotal": subtotal
-        })
-        st.success(f"Adicionado: {quantidade}x {material}")
+        if not material or material in MATERIAIS_INVALIDOS:
+            st.error("Selecione um material válido antes de adicionar.")
+        else:
+            if quantidade > estoque_disponivel_total:
+                st.warning(f"A quantidade pedida ({quantidade}) é maior que o estoque indicado ({estoque_disponivel_total} un.). O item foi incluído mesmo assim.")
+
+            item_existente = next(
+                (item for item in st.session_state.carrinho
+                 if item["material"] == material and item["ubs"] == ubs_selecionada),
+                None
+            )
+            if item_existente:
+                item_existente["quantidade"] += quantidade
+                item_existente["valor_unitario"] = valor_unitario_atual
+                item_existente["subtotal"] = item_existente["quantidade"] * valor_unitario_atual
+                st.success(f"Quantidade atualizada: {item_existente['quantidade']}x {material}")
+            else:
+                st.session_state.carrinho.append({
+                    "distrito": distrito_selecionado,
+                    "ubs": ubs_selecionada,
+                    "categoria": categoria_selecionada,
+                    "material": material,
+                    "quantidade": quantidade,
+                    "valor_unitario": valor_unitario_atual,
+                    "subtotal": quantidade * valor_unitario_atual
+                })
+                st.success(f"Adicionado: {quantidade}x {material}")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
@@ -266,7 +345,7 @@ with aba1:
         elif not supabase:
             st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
         else:
-            numero_pedido = f"PED-{int(time.time())}"
+            numero_pedido = f"PED-{int(time.time() * 1000)}"
             data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             obs_limpa = observacao_geral.strip() if observacao_geral else ""
@@ -291,8 +370,8 @@ with aba1:
 
                 try:
                     response = supabase.table("pedidos").insert(lista_insercao).execute()
-                    st.success(f"✅ Pedido {numero_pedido} enviado com sucesso!")
                     st.session_state.carrinho = []
+                    st.session_state.msg_pedido_ok = f"✅ Pedido {numero_pedido} enviado com sucesso!"
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
@@ -357,7 +436,15 @@ with aba2:
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
-                        pedidos_unicos = df_supabase[["numero_pedido", "data", "distrito", "ubs", "status"]].drop_duplicates().sort_values(by="data", ascending=False).reset_index(drop=True)
+                        pedidos_unicos = (
+                            df_supabase.sort_values(by="data", ascending=False)
+                            .drop_duplicates(subset=["numero_pedido"])
+                            .reset_index(drop=True)
+                        )
+                        pedidos_unicos["status"] = pedidos_unicos["numero_pedido"].map(
+                            lambda n: status_consolidado_pedido(df_supabase[df_supabase["numero_pedido"] == n])
+                        )
+                        pedidos_unicos = pedidos_unicos[["numero_pedido", "data", "distrito", "ubs", "status"]]
                         
                         lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
                         pedido_selecionado = st.selectbox("Escolha o número do pedido para ver ou conferir o comprovante:", lista_opcoes)
@@ -367,7 +454,7 @@ with aba2:
                             st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
                         else:
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
-                            status_atual = detalhes['status'].iloc[0] if 'status' in detalhes.columns else "Pedido enviado"
+                            status_atual = status_consolidado_pedido(detalhes)
 
                             # Tela de Conferência exclusiva para a Gestão
                             if st.session_state.perfil == "GESTAO":
@@ -391,8 +478,8 @@ with aba2:
                                         val_entregue = c_ent.number_input(
                                             f"Entregue ({mat})", 
                                             min_value=0, 
-                                            max_value=100000, 
-                                            value=qtd_atual_entregue,
+                                            max_value=max(qtd_pedida, 0), 
+                                            value=min(qtd_atual_entregue, qtd_pedida),
                                             key=f"ent_{row['id'] if 'id' in row else idx}"
                                         )
                                         novas_quantidades_entregues[row['id'] if 'id' in row else idx] = val_entregue
@@ -402,17 +489,29 @@ with aba2:
                                     btn_salvar_conf = st.form_submit_button("💾 Salvar Conferência e Atualizar Entregas")
                                     if btn_salvar_conf:
                                         try:
+                                            algum_parcial = False
+                                            atualizacoes = []
                                             for row_id, nova_qtd in novas_quantidades_entregues.items():
-                                                # Recalcula o custo total com base na quantidade entregue
                                                 row_original = detalhes[detalhes['id'] == row_id].iloc[0] if 'id' in detalhes.columns else detalhes.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
+                                                qtd_original = int(row_original['quantidade'])
                                                 v_unit = float(row_original['valor_unitario'])
-                                                novo_custo_total = nova_qtd * v_unit
-                                                
-                                                supabase.table("pedidos").update({
+                                                if nova_qtd < qtd_original:
+                                                    algum_parcial = True
+                                                atualizacoes.append((row_id, nova_qtd, nova_qtd * v_unit, row_original))
+
+                                            status_pedido = "Atendido Parcialmente" if algum_parcial else "Atendido Integralmente"
+                                            obs_g = (obs_gestao or "").strip()
+
+                                            for row_id, nova_qtd, novo_custo_total, row_original in atualizacoes:
+                                                dados_update = {
                                                     "quantidade_entregue": nova_qtd,
                                                     "custo_total": novo_custo_total,
-                                                    "status": "Atendido Parcialmente" if nova_qtd < int(row_original['quantidade']) else "Atendido Integralmente"
-                                                }).eq("id", row_id).execute()
+                                                    "status": status_pedido,
+                                                }
+                                                if obs_g:
+                                                    obs_ubs = str(row_original.get("observacao") or "").split(" | Gestão:")[0].strip()
+                                                    dados_update["observacao"] = f"{obs_ubs} | Gestão: {obs_g}" if obs_ubs else f"Gestão: {obs_g}"
+                                                supabase.table("pedidos").update(dados_update).eq("id", row_id).execute()
                                             
                                             st.success("✅ Conferência de entrega salva com sucesso! O centro de custos foi atualizado.")
                                             st.rerun()
@@ -424,7 +523,7 @@ with aba2:
                             # Atualiza os detalhes locais após possível alteração
                             response_atu = supabase.table("pedidos").select("*").eq("numero_pedido", pedido_selecionado).execute()
                             detalhes = pd.DataFrame(response_atu.data)
-                            status_atual = detalhes['status'].iloc[0] if 'status' in detalhes.columns else status_atual
+                            status_atual = status_consolidado_pedido(detalhes) if not detalhes.empty else status_atual
 
                             obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
@@ -527,6 +626,11 @@ with aba2:
                             df_cc = df_cc[df_cc['data_dt'] >= (agora - pd.Timedelta(days=30))]
                         elif periodo_cc == "Ano Atual":
                             df_cc = df_cc[df_cc['data_dt'].dt.year == agora.year]
+
+                        if 'status' in df_cc.columns:
+                            df_cc = df_cc[df_cc['status'].isin(["Atendido Parcialmente", "Atendido Integralmente"])]
+                        else:
+                            df_cc = df_cc[df_cc['quantidade_entregue'] > 0]
 
                         st.markdown("---")
 
