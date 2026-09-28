@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
+import re
 import unicodedata
 from datetime import datetime
 from supabase import create_client, Client
@@ -112,6 +113,120 @@ def status_consolidado_pedido(df_itens):
     if statuses and statuses.issubset({"Atendido Integralmente"}):
         return "Atendido Integralmente"
     return str(df_itens["status"].iloc[0])
+
+
+def slug_arquivo(texto):
+    sem_acento = unicodedata.normalize("NFKD", str(texto))
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    limpo = re.sub(r"[^\w\-]+", "-", sem_acento).strip("-")
+    return limpo or "UBS"
+
+
+def extrair_sequencia_pedido(numero_pedido):
+    encontrado = re.search(r"(?i)PED-(\d+)", str(numero_pedido or ""))
+    if not encontrado:
+        return 0
+    numero = int(encontrado.group(1))
+    if numero >= 1_000_000:
+        return 0
+    return numero
+
+
+def proximo_numero_pedido(ubs_nome):
+    proximo = 1
+    try:
+        resposta = supabase.table("pedidos").select("numero_pedido").execute()
+        for linha in resposta.data or []:
+            seq = extrair_sequencia_pedido(linha.get("numero_pedido"))
+            if seq >= proximo:
+                proximo = seq + 1
+    except Exception:
+        proximo = 1
+    data_ref = datetime.now().strftime("%Y%m%d")
+    return f"PED-{proximo:04d}-{slug_arquivo(ubs_nome)}-{data_ref}"
+
+
+def nome_arquivo_pedido(numero_pedido, ubs_nome, data_ref=None, extensao="csv"):
+    if data_ref is None:
+        data_fmt = datetime.now().strftime("%Y-%m-%d")
+    else:
+        try:
+            data_fmt = pd.to_datetime(data_ref).strftime("%Y-%m-%d")
+        except Exception:
+            data_fmt = datetime.now().strftime("%Y-%m-%d")
+    return f"{slug_arquivo(numero_pedido)}_{slug_arquivo(ubs_nome)}_{data_fmt}.{extensao}"
+
+
+def mapa_saidas_conferidas():
+    saidas = {}
+    try:
+        resposta = supabase.table("pedidos").select("material,quantidade_entregue,status").execute()
+        for linha in resposta.data or []:
+            status = str(linha.get("status") or "")
+            if status not in {"Atendido Parcialmente", "Atendido Integralmente"}:
+                continue
+            material = str(linha.get("material") or "").strip()
+            saidas[material] = saidas.get(material, 0) + parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+    except Exception:
+        pass
+    return saidas
+
+
+def mapa_estoque_lotes():
+    saldos = {}
+    materiais_com_lote = set()
+    try:
+        resposta = supabase.table("estoque_central").select("material,quantidade_atual").execute()
+        for linha in resposta.data or []:
+            material = str(linha.get("material") or "").strip()
+            if not material:
+                continue
+            materiais_com_lote.add(material)
+            saldos[material] = saldos.get(material, 0) + parse_numero(linha.get("quantidade_atual"), inteiro=True)
+    except Exception:
+        pass
+    return saldos, materiais_com_lote
+
+
+def estoque_visivel(material, estoque_planilha, saidas, saldos_lote, materiais_com_lote):
+    material = str(material or "").strip()
+    if material in materiais_com_lote:
+        return max(0, saldos_lote.get(material, 0))
+    return max(0, parse_numero(estoque_planilha, inteiro=True) - saidas.get(material, 0))
+
+
+def aplicar_baixa_estoque_central(material, delta):
+    delta = int(delta or 0)
+    if delta == 0:
+        return
+    try:
+        resposta = supabase.table("estoque_central").select("id,quantidade_atual,validade").eq("material", material).execute()
+        lotes = resposta.data or []
+        if not lotes:
+            return
+        lotes = sorted(lotes, key=lambda lote: str(lote.get("validade") or "9999-12-31"))
+        if delta > 0:
+            restante = delta
+            for lote in lotes:
+                if restante <= 0:
+                    break
+                atual = parse_numero(lote.get("quantidade_atual"), inteiro=True)
+                if atual <= 0:
+                    continue
+                retirar = min(atual, restante)
+                supabase.table("estoque_central").update({
+                    "quantidade_atual": atual - retirar
+                }).eq("id", lote["id"]).execute()
+                restante -= retirar
+        else:
+            devolver = abs(delta)
+            lote = lotes[0]
+            atual = parse_numero(lote.get("quantidade_atual"), inteiro=True)
+            supabase.table("estoque_central").update({
+                "quantidade_atual": atual + devolver
+            }).eq("id", lote["id"]).execute()
+    except Exception:
+        pass
 
 
 @st.cache_data(ttl=300)
@@ -242,6 +357,9 @@ with aba1:
         lista_categorias = ["Erro"]
         df_materiais = pd.DataFrame()
         col_categoria = col_material = col_estoque = col_preco = None
+
+    saidas_conferidas = mapa_saidas_conferidas()
+    saldos_lote, materiais_com_lote = mapa_estoque_lotes()
         
     categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
     
@@ -264,8 +382,10 @@ with aba1:
     if not df_materiais.empty and material and col_material:
         item_row = df_materiais[df_materiais[col_material] == material]
         if not item_row.empty:
-            if col_estoque:
-                estoque_disponivel_total = parse_numero(item_row[col_estoque].values[0], inteiro=True)
+            estoque_planilha = parse_numero(item_row[col_estoque].values[0], inteiro=True) if col_estoque else 0
+            estoque_disponivel_total = estoque_visivel(
+                material, estoque_planilha, saidas_conferidas, saldos_lote, materiais_com_lote
+            )
             if col_preco:
                 valor_unitario_atual = parse_numero(item_row[col_preco].values[0])
 
@@ -276,6 +396,7 @@ with aba1:
             st.markdown(f"**Estoque:** <span style='color: orange;'>🟡 Baixo ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
         else:
             st.markdown(f"**Estoque:** <span style='color: red;'>🔴 Ruptura / Zero</span>", unsafe_allow_html=True)
+        st.caption("O saldo só cai depois da conferência do almoxarifado.")
 
     with col3:
         quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
@@ -345,7 +466,7 @@ with aba1:
         elif not supabase:
             st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
         else:
-            numero_pedido = f"PED-{int(time.time() * 1000)}"
+            numero_pedido = proximo_numero_pedido(ubs_selecionada)
             data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             obs_limpa = observacao_geral.strip() if observacao_geral else ""
@@ -459,7 +580,7 @@ with aba2:
                             # Tela de Conferência exclusiva para a Gestão
                             if st.session_state.perfil == "GESTAO":
                                 st.markdown("### 📦 Painel de Conferência do Almoxarifado (Itens Entregues)")
-                                st.info("Insira abaixo a quantidade que foi **efetivamente entregue/despachada** para a UBS. O custo financeiro e o centro de custos serão calculados estritamente sobre o entregue.")
+                                st.info("Insira a quantidade **efetivamente entregue**. O estoque só é baixado nesta conferência; o envio do pedido pela UBS não altera o saldo.")
                                 
                                 with st.form(key=f"form_conferencia_{pedido_selecionado}"):
                                     novas_quantidades_entregues = {}
@@ -503,6 +624,8 @@ with aba2:
                                             obs_g = (obs_gestao or "").strip()
 
                                             for row_id, nova_qtd, novo_custo_total, row_original in atualizacoes:
+                                                qtd_ja_entregue = parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
+                                                delta_estoque = nova_qtd - qtd_ja_entregue
                                                 dados_update = {
                                                     "quantidade_entregue": nova_qtd,
                                                     "custo_total": novo_custo_total,
@@ -512,8 +635,9 @@ with aba2:
                                                     obs_ubs = str(row_original.get("observacao") or "").split(" | Gestão:")[0].strip()
                                                     dados_update["observacao"] = f"{obs_ubs} | Gestão: {obs_g}" if obs_ubs else f"Gestão: {obs_g}"
                                                 supabase.table("pedidos").update(dados_update).eq("id", row_id).execute()
+                                                aplicar_baixa_estoque_central(str(row_original.get("material") or "").strip(), delta_estoque)
                                             
-                                            st.success("✅ Conferência de entrega salva com sucesso! O centro de custos foi atualizado.")
+                                            st.success("✅ Conferência salva. Estoque baixado com a quantidade entregue e centro de custos atualizado.")
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Erro ao salvar conferência no Supabase: {e}")
@@ -588,8 +712,23 @@ with aba2:
                             st.markdown("Assinatura do Responsável / Recebimento na UBS")
                             st.markdown("<br>", unsafe_allow_html=True)
 
+                            nome_csv_pedido = nome_arquivo_pedido(
+                                pedido_selecionado,
+                                detalhes["ubs"].iloc[0],
+                                detalhes["data"].iloc[0],
+                                extensao="csv",
+                            )
+                            csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
+                            st.download_button(
+                                "📥 Baixar comprovante do pedido (CSV)",
+                                data=csv_pedido,
+                                file_name=nome_csv_pedido,
+                                mime="text/csv",
+                                key=f"dl_comp_{pedido_selecionado}",
+                            )
+
                             if st.button("🖨️ Imprimir ou Salvar Comprovante em PDF"):
-                                st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
+                                st.info(f"💡 Na janela de impressão, escolha **Salvar como PDF**. Nome sugerido: **{nome_csv_pedido.replace('.csv', '.pdf')}**")
                                 st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif modo_aba2 == "💰 Centro de Custos e Orçamento (Efetivo)":
