@@ -569,6 +569,15 @@ def html_seguro(texto):
     )
 
 
+def dataframe_para_html(df):
+    cabecalho = "".join(f"<th>{html_seguro(col)}</th>" for col in df.columns)
+    linhas = []
+    for _, linha in df.iterrows():
+        celulas = "".join(f"<td>{html_seguro(valor)}</td>" for valor in linha.tolist())
+        linhas.append(f"<tr>{celulas}</tr>")
+    return f"<table><thead><tr>{cabecalho}</tr></thead><tbody>{''.join(linhas)}</tbody></table>"
+
+
 def html_bloco_assinaturas(esquerda_titulo, esquerda_legenda, direita_titulo, direita_legenda):
     return f"""
     <div class="bloco-assinaturas">
@@ -1933,6 +1942,7 @@ with aba2:
                                 extensao="pdf",
                             )
                             nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
+                            tabela_html = dataframe_para_html(df_print)
                             html_relatorio = f"""
                             <div class="area-impressao" style="padding: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
