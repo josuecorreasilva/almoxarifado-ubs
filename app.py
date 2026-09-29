@@ -7,6 +7,13 @@ from datetime import datetime, date
 from supabase import create_client, Client
 
 try:
+    from st_keyup import st_keyup
+    BUSCA_AO_DIGITAR = True
+except ImportError:
+    st_keyup = None
+    BUSCA_AO_DIGITAR = False
+
+try:
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     FPDF_DISPONIVEL = True
@@ -143,6 +150,27 @@ st.markdown("""
     div.stButton > button[kind="primary"] {
         background: #0e4d56;
         border: 0;
+    }
+    .st-key-catalogo_marcacao p,
+    .st-key-catalogo_marcacao [data-testid="stMarkdownContainer"],
+    .st-key-catalogo_marcacao [data-testid="stWidgetLabel"],
+    .st-key-catalogo_marcacao label {
+        font-size: 0.8rem !important;
+        line-height: 1.25 !important;
+    }
+    .st-key-catalogo_marcacao [data-testid="stVerticalBlock"] {
+        gap: 0.2rem !important;
+    }
+    .st-key-catalogo_marcacao [data-testid="stNumberInput"] input {
+        font-size: 0.8rem !important;
+        padding-top: 0.2rem !important;
+        padding-bottom: 0.2rem !important;
+    }
+    .st-key-catalogo_marcacao [data-testid="stCheckbox"] {
+        min-height: 1.2rem !important;
+    }
+    .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
+        cursor: pointer !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -1312,69 +1340,55 @@ with aba1:
         df_filtrado = df_filtrado[~df_filtrado[col_material].isin(MATERIAIS_INVALIDOS)]
         df_filtrado = df_filtrado.drop_duplicates(subset=[col_material], keep="first")
 
-        st.markdown("##### Catálogo da categoria")
-        st.caption("Marque o que a unidade precisa e informe só a quantidade. Depois clique em **Incluir itens marcados**.")
-        filtro_nome = st.text_input("Filtrar pelo nome do material", key="filtro_nome_catalogo")
-        if filtro_nome.strip():
-            df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
+        with st.container(key="catalogo_marcacao"):
+            st.markdown("##### Catálogo da categoria")
+            st.caption("Clique na caixa ou no nome do material para marcar. Informe a quantidade ao lado. O estoque é conferido na gestão, no despacho.")
+            if BUSCA_AO_DIGITAR:
+                filtro_nome = st_keyup("Filtrar pelo nome do material", key="filtro_nome_catalogo", debounce=150)
+            else:
+                filtro_nome = st.text_input("Filtrar pelo nome do material", key="filtro_nome_catalogo")
+            filtro_nome = str(filtro_nome or "")
+            if filtro_nome.strip():
+                df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
 
-        if df_filtrado.empty:
-            st.info("Nenhum material nesta categoria com o filtro atual.")
-        else:
-            cab1, cab2, cab3, cab4 = st.columns([0.45, 3.1, 1.4, 1.1])
-            cab1.write("")
-            cab2.write("**Material**")
-            cab3.write("**Disponibilidade**")
-            cab4.write("**Qtd**")
-            with st.form("form_catalogo_itens"):
-                escolhas = []
-                for i, (_, item_row) in enumerate(df_filtrado.iterrows()):
-                    material_cat = str(item_row[col_material]).strip()
-                    estoque_planilha = parse_numero(item_row[col_estoque], inteiro=True) if col_estoque else 0
-                    estoque_item = estoque_visivel(
-                        material_cat, estoque_planilha, saidas_conferidas, saldos_lote, materiais_com_lote
-                    )
-                    valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
-                    qtd_sug = quantidade_sugerida_pedido(estoque_item)
-                    c_chk, c_nome, c_est, c_qtd = st.columns([0.45, 3.1, 1.4, 1.1])
-                    marcado = c_chk.checkbox(" ", key=f"cat_chk_{i}", label_visibility="collapsed")
-                    c_nome.write(material_cat)
-                    if estoque_item > LIMIAR_ESTOQUE_BAIXO:
-                        c_est.markdown(f"<span style='color:#1e7a46;'>Regular ({estoque_item})</span>", unsafe_allow_html=True)
-                    elif estoque_item > 0:
-                        c_est.markdown(f"<span style='color:#b86a00;'>Reduzido ({estoque_item})</span>", unsafe_allow_html=True)
-                    else:
-                        c_est.markdown("<span style='color:#b42318;'>Indisponível</span>", unsafe_allow_html=True)
-                    qtd_item = c_qtd.number_input(
-                        "Qtd",
-                        min_value=1,
-                        value=qtd_sug,
-                        key=f"cat_qtd_{i}",
-                        label_visibility="collapsed",
-                    )
-                    escolhas.append((marcado, material_cat, qtd_item, valor_item, estoque_item))
-                incluir_marcados = st.form_submit_button("Incluir itens marcados", type="primary")
-            if incluir_marcados:
-                marcados = [e for e in escolhas if e[0]]
-                if not marcados:
-                    st.warning("Marque pelo menos um item.")
-                else:
-                    avisos = []
-                    for _, material_cat, qtd_item, valor_item, estoque_item in marcados:
-                        if qtd_item > estoque_item:
-                            avisos.append(f"{material_cat}: pedido {qtd_item} un. com saldo {estoque_item} un.")
-                        incluir_item_carrinho(
-                            distrito_selecionado,
-                            ubs_selecionada,
-                            categoria_selecionada,
-                            material_cat,
-                            qtd_item,
-                            valor_item,
+            if df_filtrado.empty:
+                st.info("Nenhum material nesta categoria com o filtro atual.")
+            else:
+                cab1, cab2 = st.columns([5.2, 1.1])
+                cab1.markdown("**Material**")
+                cab2.markdown("**Qtd**")
+                with st.form("form_catalogo_itens"):
+                    escolhas = []
+                    for i, (_, item_row) in enumerate(df_filtrado.iterrows()):
+                        material_cat = str(item_row[col_material]).strip()
+                        valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
+                        c_chk, c_qtd = st.columns([5.2, 1.1])
+                        marcado = c_chk.checkbox(material_cat, key=f"cat_chk_{i}")
+                        qtd_item = c_qtd.number_input(
+                            "Qtd",
+                            min_value=1,
+                            value=1,
+                            key=f"cat_qtd_{i}",
+                            label_visibility="collapsed",
                         )
-                    st.success(f"{len(marcados)} item(ns) incluído(s) na requisição.")
-                    for aviso in avisos:
-                        st.warning(aviso)
-                    st.rerun()
+                        escolhas.append((marcado, material_cat, qtd_item, valor_item))
+                    incluir_marcados = st.form_submit_button("Incluir itens marcados", type="primary")
+                if incluir_marcados:
+                    marcados = [e for e in escolhas if e[0]]
+                    if not marcados:
+                        st.warning("Marque pelo menos um item.")
+                    else:
+                        for _, material_cat, qtd_item, valor_item in marcados:
+                            incluir_item_carrinho(
+                                distrito_selecionado,
+                                ubs_selecionada,
+                                categoria_selecionada,
+                                material_cat,
+                                qtd_item,
+                                valor_item,
+                            )
+                        st.success(f"{len(marcados)} item(ns) incluído(s) na requisição.")
+                        st.rerun()
     else:
         st.caption("Selecione a categoria para ver o catálogo e marcar os itens.")
 
