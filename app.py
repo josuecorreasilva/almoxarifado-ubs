@@ -867,6 +867,31 @@ def quantidade_sugerida_pedido(estoque):
     return 10
 
 
+def incluir_item_carrinho(distrito, ubs, categoria, material, quantidade, valor_unitario):
+    quantidade = max(1, parse_numero(quantidade, inteiro=True))
+    valor_unitario = parse_numero(valor_unitario)
+    item_existente = next(
+        (item for item in st.session_state.carrinho
+         if item["material"] == material and item["ubs"] == ubs),
+        None
+    )
+    if item_existente:
+        item_existente["quantidade"] += quantidade
+        item_existente["valor_unitario"] = valor_unitario
+        item_existente["subtotal"] = item_existente["quantidade"] * valor_unitario
+        return f"Quantidade atualizada: {item_existente['quantidade']}x {material}"
+    st.session_state.carrinho.append({
+        "distrito": distrito,
+        "ubs": ubs,
+        "categoria": categoria,
+        "material": material,
+        "quantidade": quantidade,
+        "valor_unitario": valor_unitario,
+        "subtotal": quantidade * valor_unitario,
+    })
+    return f"Adicionado: {quantidade}x {material}"
+
+
 def sugerir_rateio(quantidades_pedidas, estoque):
     estoque = max(0, parse_numero(estoque, inteiro=True))
     pedidos = [max(0, parse_numero(q, inteiro=True)) for q in quantidades_pedidas]
@@ -1272,98 +1297,86 @@ with aba1:
 
     opcoes_categoria = ["Selecione a categoria"] + [c for c in lista_categorias if c not in MATERIAIS_INVALIDOS]
     categoria_selecionada = st.selectbox("Categoria", opcoes_categoria, index=0, key="sel_categoria_pedido")
-    
+
+    if 'carrinho' not in st.session_state:
+        st.session_state.carrinho = []
+
     if (
         not df_materiais.empty
         and col_categoria
         and col_material
         and categoria_selecionada not in MATERIAIS_INVALIDOS
     ):
-         df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada]
-         lista_de_itens = ["Selecione o material"] + df_filtrado[col_material].dropna().tolist()
+        df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada].copy()
+        df_filtrado[col_material] = df_filtrado[col_material].astype(str).str.strip()
+        df_filtrado = df_filtrado[~df_filtrado[col_material].isin(MATERIAIS_INVALIDOS)]
+        df_filtrado = df_filtrado.drop_duplicates(subset=[col_material], keep="first")
+
+        st.markdown("##### Catálogo da categoria")
+        st.caption("Marque o que a unidade precisa e informe só a quantidade. Depois clique em **Incluir itens marcados**.")
+        filtro_nome = st.text_input("Filtrar pelo nome do material", key="filtro_nome_catalogo")
+        if filtro_nome.strip():
+            df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
+
+        if df_filtrado.empty:
+            st.info("Nenhum material nesta categoria com o filtro atual.")
+        else:
+            cab1, cab2, cab3, cab4 = st.columns([0.45, 3.1, 1.4, 1.1])
+            cab1.write("")
+            cab2.write("**Material**")
+            cab3.write("**Disponibilidade**")
+            cab4.write("**Qtd**")
+            with st.form("form_catalogo_itens"):
+                escolhas = []
+                for i, (_, item_row) in enumerate(df_filtrado.iterrows()):
+                    material_cat = str(item_row[col_material]).strip()
+                    estoque_planilha = parse_numero(item_row[col_estoque], inteiro=True) if col_estoque else 0
+                    estoque_item = estoque_visivel(
+                        material_cat, estoque_planilha, saidas_conferidas, saldos_lote, materiais_com_lote
+                    )
+                    valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
+                    qtd_sug = quantidade_sugerida_pedido(estoque_item)
+                    c_chk, c_nome, c_est, c_qtd = st.columns([0.45, 3.1, 1.4, 1.1])
+                    marcado = c_chk.checkbox(" ", key=f"cat_chk_{i}", label_visibility="collapsed")
+                    c_nome.write(material_cat)
+                    if estoque_item > LIMIAR_ESTOQUE_BAIXO:
+                        c_est.markdown(f"<span style='color:#1e7a46;'>Regular ({estoque_item})</span>", unsafe_allow_html=True)
+                    elif estoque_item > 0:
+                        c_est.markdown(f"<span style='color:#b86a00;'>Reduzido ({estoque_item})</span>", unsafe_allow_html=True)
+                    else:
+                        c_est.markdown("<span style='color:#b42318;'>Indisponível</span>", unsafe_allow_html=True)
+                    qtd_item = c_qtd.number_input(
+                        "Qtd",
+                        min_value=1,
+                        value=qtd_sug,
+                        key=f"cat_qtd_{i}",
+                        label_visibility="collapsed",
+                    )
+                    escolhas.append((marcado, material_cat, qtd_item, valor_item, estoque_item))
+                incluir_marcados = st.form_submit_button("Incluir itens marcados", type="primary")
+            if incluir_marcados:
+                marcados = [e for e in escolhas if e[0]]
+                if not marcados:
+                    st.warning("Marque pelo menos um item.")
+                else:
+                    avisos = []
+                    for _, material_cat, qtd_item, valor_item, estoque_item in marcados:
+                        if qtd_item > estoque_item:
+                            avisos.append(f"{material_cat}: pedido {qtd_item} un. com saldo {estoque_item} un.")
+                        incluir_item_carrinho(
+                            distrito_selecionado,
+                            ubs_selecionada,
+                            categoria_selecionada,
+                            material_cat,
+                            qtd_item,
+                            valor_item,
+                        )
+                    st.success(f"{len(marcados)} item(ns) incluído(s) na requisição.")
+                    for aviso in avisos:
+                        st.warning(aviso)
+                    st.rerun()
     else:
-         lista_de_itens = ["Selecione o material"]
-         
-    if 'carrinho' not in st.session_state:
-        st.session_state.carrinho = []
-        
-    col1, col2, col3 = st.columns([2.2, 1.4, 1.2])
-    with col1:
-        material = st.selectbox("Material", lista_de_itens, index=0, key="sel_material_pedido")
-        
-    material_valido = material not in MATERIAIS_INVALIDOS
-    estoque_disponivel_total = 0
-    valor_unitario_atual = 0.0
-
-    if material_valido and not df_materiais.empty and col_material:
-        item_row = df_materiais[df_materiais[col_material] == material]
-        if not item_row.empty:
-            estoque_planilha = parse_numero(item_row[col_estoque].values[0], inteiro=True) if col_estoque else 0
-            estoque_disponivel_total = estoque_visivel(
-                material, estoque_planilha, saidas_conferidas, saldos_lote, materiais_com_lote
-            )
-            if col_preco:
-                valor_unitario_atual = parse_numero(item_row[col_preco].values[0])
-
-    with col2:
-        if not material_valido:
-            st.markdown("**Disponibilidade**")
-            st.caption("Selecione um material para consultar o estoque.")
-        elif estoque_disponivel_total > LIMIAR_ESTOQUE_BAIXO:
-            st.markdown(f"**Disponibilidade:** <span style='color: #1e7a46;'>Regular ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
-            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
-        elif estoque_disponivel_total > 0:
-            st.markdown(f"**Disponibilidade:** <span style='color: #b86a00;'>Estoque reduzido ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
-            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
-        else:
-            st.markdown("**Disponibilidade:** <span style='color: #b42318;'>Indisponível</span>", unsafe_allow_html=True)
-            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
-
-    with col3:
-        if material_valido:
-            qtd_sugerida_form = quantidade_sugerida_pedido(estoque_disponivel_total)
-            quantidade = st.number_input(
-                "Quantidade",
-                min_value=1,
-                value=qtd_sugerida_form,
-                key=f"qtd_nec_{material}",
-            )
-            if 0 < estoque_disponivel_total <= LIMIAR_ESTOQUE_BAIXO:
-                st.caption(f"Sugestão: {qtd_sugerida_form} un. (estoque reduzido).")
-            elif estoque_disponivel_total <= 0:
-                st.caption("Sem saldo. A quantidade registra a demanda da unidade.")
-        else:
-            quantidade = 1
-            st.number_input("Quantidade", min_value=1, value=1, disabled=True, key="qtd_nec_placeholder")
-        
-    if st.button("Adicionar item", key="btn_adicionar_item"):
-        if not material or material in MATERIAIS_INVALIDOS:
-            st.error("Selecione um material válido antes de adicionar.")
-        else:
-            if quantidade > estoque_disponivel_total:
-                st.warning(f"A quantidade pedida ({quantidade}) é maior que o estoque indicado ({estoque_disponivel_total} un.). O item foi incluído mesmo assim.")
-
-            item_existente = next(
-                (item for item in st.session_state.carrinho
-                 if item["material"] == material and item["ubs"] == ubs_selecionada),
-                None
-            )
-            if item_existente:
-                item_existente["quantidade"] += quantidade
-                item_existente["valor_unitario"] = valor_unitario_atual
-                item_existente["subtotal"] = item_existente["quantidade"] * valor_unitario_atual
-                st.success(f"Quantidade atualizada: {item_existente['quantidade']}x {material}")
-            else:
-                st.session_state.carrinho.append({
-                    "distrito": distrito_selecionado,
-                    "ubs": ubs_selecionada,
-                    "categoria": categoria_selecionada,
-                    "material": material,
-                    "quantidade": quantidade,
-                    "valor_unitario": valor_unitario_atual,
-                    "subtotal": quantidade * valor_unitario_atual
-                })
-                st.success(f"Adicionado: {quantidade}x {material}")
+        st.caption("Selecione a categoria para ver o catálogo e marcar os itens.")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
