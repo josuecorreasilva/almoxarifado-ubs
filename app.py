@@ -119,6 +119,11 @@ st.markdown("""
     .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1400px; }
     [data-testid="stSidebar"] { background: #f4f7f8; }
     [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stSidebarNav"],
+    [data-testid="stSidebarNavItems"],
+    [data-testid="stSidebarNavSeparator"] {
+        display: none !important;
+    }
     .sispac-header {
         background: linear-gradient(90deg, #0e4d56 0%, #1a6b75 100%);
         color: #fff;
