@@ -15,11 +15,40 @@ st.set_page_config(page_title="SisPAC — SMS Pelotas", page_icon="🏥", layout
 st.markdown("""
     <style>
     @media print {
-        [data-testid="stSidebar"], header, button, .stButton, .nao-imprimir {
+        @page { margin: 12mm; }
+        [data-testid="stSidebar"],
+        header,
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        [data-baseweb="tab-list"],
+        [role="tablist"],
+        .nao-imprimir {
             display: none !important;
         }
-        body { background-color: white; }
+        body * { visibility: hidden !important; }
+        .area-impressao, .area-impressao * { visibility: visible !important; }
+        .area-impressao {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white;
+        }
+        body { background: white !important; }
     }
+    .area-impressao table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 8px 0 16px 0;
+        font-size: 13px;
+    }
+    .area-impressao th, .area-impressao td {
+        border: 1px solid #999;
+        padding: 6px 8px;
+        text-align: left;
+    }
+    .area-impressao th { background: #f2f2f2; }
     .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1400px; }
     [data-testid="stSidebar"] { background: #f4f7f8; }
     [data-testid="stHeader"] { background: transparent; }
@@ -179,6 +208,116 @@ def nome_arquivo_pedido(numero_pedido, ubs_nome, data_ref=None, extensao="csv"):
         except Exception:
             data_fmt = datetime.now().strftime("%Y-%m-%d")
     return f"{slug_arquivo(numero_pedido)}_{slug_arquivo(ubs_nome)}_{data_fmt}.{extensao}"
+
+
+def aplicar_sufixo_arquivo(nome_arquivo, sufixo):
+    if "." not in nome_arquivo:
+        return f"{nome_arquivo}_{sufixo}"
+    raiz, ext = nome_arquivo.rsplit(".", 1)
+    return f"{raiz}_{sufixo}.{ext}"
+
+
+def documento_html_completo(corpo_html, titulo):
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>{html_seguro(titulo)}</title>
+<style>
+body {{ font-family: Arial, sans-serif; color: #222; margin: 24px; }}
+table {{ width: 100%; border-collapse: collapse; margin: 8px 0 16px 0; font-size: 13px; }}
+th, td {{ border: 1px solid #999; padding: 6px 8px; text-align: left; }}
+th {{ background: #f2f2f2; }}
+</style>
+</head>
+<body>
+{corpo_html}
+</body>
+</html>""".encode("utf-8")
+
+
+def html_seguro(texto):
+    return (
+        str(texto)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def formatar_moeda_br(valor):
+    try:
+        return f"R$ {float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return "R$ 0,00"
+
+
+def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
+    obs = ""
+    if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
+        obs = str(detalhes["observacao"].iloc[0]).strip()
+    titulo_extra = " (via operacional — sem valores)" if sem_custo else " (via gerencial — com custos)"
+    blocos = []
+    custo_total = 0.0
+    for cat in detalhes["categoria"].unique():
+        df_cat = detalhes[detalhes["categoria"] == cat]
+        if sem_custo:
+            linhas = "".join(
+                f"<tr><td>{html_seguro(r['material'])}</td>"
+                f"<td>{parse_numero(r['quantidade'], True)}</td>"
+                f"<td>{parse_numero(r.get('quantidade_entregue'), True)}</td></tr>"
+                for _, r in df_cat.iterrows()
+            )
+            tabela = (
+                "<table><thead><tr><th>Material</th><th>Solicitado</th><th>Entregue</th></tr></thead>"
+                f"<tbody>{linhas}</tbody></table>"
+            )
+            cab_cat = f"<p style='margin:10px 0 4px 0;'><b>Categoria: {html_seguro(cat)}</b></p>"
+        else:
+            subtotal = float(df_cat["custo_total"].sum()) if "custo_total" in df_cat.columns else 0.0
+            custo_total += subtotal
+            linhas = "".join(
+                f"<tr><td>{html_seguro(r['material'])}</td>"
+                f"<td>{parse_numero(r['quantidade'], True)}</td>"
+                f"<td>{parse_numero(r.get('quantidade_entregue'), True)}</td>"
+                f"<td>{formatar_moeda_br(r.get('valor_unitario', 0))}</td>"
+                f"<td>{formatar_moeda_br(r.get('custo_total', 0))}</td></tr>"
+                for _, r in df_cat.iterrows()
+            )
+            tabela = (
+                "<table><thead><tr><th>Material</th><th>Solicitado</th><th>Entregue</th>"
+                "<th>Valor unitário</th><th>Custo entregue</th></tr></thead>"
+                f"<tbody>{linhas}</tbody></table>"
+            )
+            cab_cat = (
+                f"<p style='margin:10px 0 4px 0;'><b>Categoria: {html_seguro(cat)}</b>"
+                f" &nbsp; Subtotal: {formatar_moeda_br(subtotal)}</p>"
+            )
+        blocos.append(cab_cat + tabela)
+    rodape_custo = "" if sem_custo else (
+        f"<p style='margin-top:12px;padding:10px;border:1px solid #1abc9c;background:#e8f8f5;'>"
+        f"<b>Custo total efetivo: {formatar_moeda_br(custo_total)}</b></p>"
+    )
+    obs_html = (
+        f"<p style='margin-top:10px;padding:10px;border:1px solid #d35400;'>"
+        f"<b>Observações:</b><br>{html_seguro(obs)}</p>" if obs else ""
+    )
+    return f"""
+    <div class="area-impressao" style="border:2px solid #333;padding:20px;background:#fff;">
+        <h3 style="text-align:center;margin:0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
+        <h4 style="text-align:center;color:#555;margin:6px 0 16px 0;">Comprovante de Requisição e Entrega — SisPAC{titulo_extra}</h4>
+        <p><b>Nº do Pedido:</b> {html_seguro(detalhes['numero_pedido'].iloc[0] if 'numero_pedido' in detalhes.columns else '')}</p>
+        <p><b>Data/Hora do envio:</b> {html_seguro(detalhes['data'].iloc[0])}</p>
+        <p><b>Distrito:</b> {html_seguro(detalhes['distrito'].iloc[0])}</p>
+        <p><b>Unidade (UBS):</b> {html_seguro(detalhes['ubs'].iloc[0])}</p>
+        <p><b>Status:</b> {html_seguro(status_atual)}</p>
+        {obs_html}
+        {''.join(blocos)}
+        {rodape_custo}
+        <p style="margin-top:36px;">____________________________________________________</p>
+        <p>Assinatura do responsável / recebimento na UBS</p>
+    </div>
+    """
 
 
 def mapa_saidas_conferidas():
@@ -691,8 +830,11 @@ with aba1:
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
-    st.markdown("#### Painel de controle")
-    st.caption("Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.")
+    st.markdown(
+        "<div class='nao-imprimir'><h4>Painel de controle</h4>"
+        "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.</p></div>",
+        unsafe_allow_html=True,
+    )
     
     if not supabase:
         st.error("Banco de dados desconectado.")
@@ -1039,85 +1181,61 @@ with aba2:
 
                             obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                            st.markdown(f"""
-                            <div style="border: 2px solid #333; padding: 20px; border-radius: 8px; background-color: #ffffff;">
-                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE</h3>
-                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">Comprovante Oficial de Requisição e Entrega - SisPAC</h4>
-                                <hr style="border: 0.5px solid #ccc;">
-                                <p style="margin: 5px 0;"><b>Nº do Pedido:</b> {pedido_selecionado}</p>
-                                <p style="margin: 5px 0;"><b>Data/Hora do Envio:</b> {detalhes['data'].iloc[0]}</p>
-                                <p style="margin: 5px 0;"><b>Distrito:</b> {detalhes['distrito'].iloc[0]}</p>
-                                <p style="margin: 5px 0;"><b>Unidade (UBS):</b> {detalhes['ubs'].iloc[0]}</p>
-                                <p style="margin: 5px 0;"><b>Status Atual:</b> <span style="background-color: #2980b9; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold;">{status_atual}</span></p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            if obs_geral.strip():
-                                st.markdown(f"""
-                                <div style="margin-top: 10px; padding: 12px; border: 1px solid #d35400; background-color: #fdfaf6; border-radius: 5px;">
-                                    <span style="color: #d35400; font-weight: bold;">📌 Observações Gerais:</span><br>
-                                    <span style="color: #333; font-size: 14px;">{obs_geral}</span>
-                                </div>
-                                """, unsafe_allow_html=True)
-
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            st.write("**Detalhamento de Itens (Solicitado vs. Entregue e Custos):**")
-                            
-                            categorias_presentes = detalhes["categoria"].unique()
-                            custo_total_pedido_efetivo = 0.0
-
-                            for cat in categorias_presentes:
-                                df_cat_raw = detalhes[detalhes["categoria"] == cat]
-                                
-                                if st.session_state.perfil == "GESTAO":
-                                    custo_cat_efetivo = df_cat_raw["custo_total"].sum()
-                                    custo_total_pedido_efetivo += custo_cat_efetivo
-                                    
-                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b> <span style='float: right; color: #16a085;'>Subtotal Entregue (Efetivo): R$ {custo_cat_efetivo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + "</span></p>", unsafe_allow_html=True)
-                                    
-                                    df_cat = df_cat_raw[["material", "quantidade", "quantidade_entregue", "valor_unitario", "custo_total"]].copy()
-                                    df_cat.columns = ["Material", "Solicitado", "Entregue", "Valor Unitário (R$)", "Custo Total Entregue (R$)"]
-                                    
-                                    df_cat["Valor Unitário (R$)"] = df_cat["Valor Unitário (R$)"].apply(lambda x: f"R$ {float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(x) else "R$ 0,00")
-                                    df_cat["Custo Total Entregue (R$)"] = df_cat["Custo Total Entregue (R$)"].apply(lambda x: f"R$ {float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notna(x) else "R$ 0,00")
-                                else:
-                                    st.markdown(f"<p style='margin-bottom: 2px; color: #2c3e50;'><b>📂 Categoria: {cat}</b></p>", unsafe_allow_html=True)
-                                    df_cat = df_cat_raw[["material", "quantidade", "quantidade_entregue"]].rename(columns={"material": "Material", "quantidade": "Qtd Solicitada", "quantidade_entregue": "Qtd Entregue"})
-                                
-                                st.dataframe(df_cat, use_container_width=True, hide_index=True)
-                                st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
-                            
                             if st.session_state.perfil == "GESTAO":
-                                custo_total_str = f"R$ {custo_total_pedido_efetivo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                                st.markdown(f"""
-                                <div style="padding: 12px; background-color: #e8f8f5; border: 1px solid #1abc9c; border-left: 6px solid #16a085; border-radius: 4px; margin-top: 15px; margin-bottom: 15px;">
-                                    <span style="color: #117a65; font-size: 16px; font-weight: bold;">💰 Custo Total Efetivo deste Pedido (Centro de Custos): {custo_total_str}</span>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                modelo_impressao = st.radio(
+                                    "Modelo de impressão do pedido",
+                                    ["Sem valores (via operacional)", "Com custos (via gerencial)"],
+                                    horizontal=True,
+                                    key=f"modelo_imp_{pedido_selecionado}",
+                                )
+                                sem_custo_print = modelo_impressao.startswith("Sem valores")
+                            else:
+                                sem_custo_print = True
+                                st.caption("A via impressa desta unidade não inclui valores unitários nem custo total.")
 
-                            st.markdown("<br><br>", unsafe_allow_html=True)
-                            st.markdown("____________________________________________________")
-                            st.markdown("Assinatura do Responsável / Recebimento na UBS")
-                            st.markdown("<br>", unsafe_allow_html=True)
+                            html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
+                            st.markdown(html_pedido, unsafe_allow_html=True)
 
-                            nome_csv_pedido = nome_arquivo_pedido(
+                            nome_base = nome_arquivo_pedido(
                                 pedido_selecionado,
                                 detalhes["ubs"].iloc[0],
                                 detalhes["data"].iloc[0],
-                                extensao="csv",
+                                extensao="html",
                             )
-                            csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
-                            st.download_button(
-                                "📥 Baixar comprovante do pedido (CSV)",
-                                data=csv_pedido,
-                                file_name=nome_csv_pedido,
-                                mime="text/csv",
-                                key=f"dl_comp_{pedido_selecionado}",
-                            )
+                            sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
+                            nome_html = aplicar_sufixo_arquivo(nome_base, sufixo_via)
+                            nome_csv_final = aplicar_sufixo_arquivo(nome_base.replace(".html", ".csv"), sufixo_via)
 
-                            if st.button("🖨️ Imprimir ou Salvar Comprovante em PDF"):
-                                st.info(f"💡 Na janela de impressão, escolha **Salvar como PDF**. Nome sugerido: **{nome_csv_pedido.replace('.csv', '.pdf')}**")
-                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+                            csv_cols = [c for c in ["numero_pedido", "data", "distrito", "ubs", "categoria", "material", "quantidade", "quantidade_entregue", "status", "observacao"] if c in detalhes.columns]
+                            if sem_custo_print and csv_cols:
+                                csv_pedido = detalhes[csv_cols].to_csv(index=False).encode("utf-8")
+                            else:
+                                csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
+
+                            arquivo_html = documento_html_completo(html_pedido, nome_html.replace(".html", ""))
+                            st.caption(f"Nome do arquivo: `{nome_html}`")
+
+                            c_html, c_csv, c_imp = st.columns(3)
+                            with c_html:
+                                st.download_button(
+                                    "Baixar comprovante",
+                                    data=arquivo_html,
+                                    file_name=nome_html,
+                                    mime="text/html",
+                                    key=f"dl_html_{pedido_selecionado}",
+                                )
+                            with c_csv:
+                                st.download_button(
+                                    "Baixar planilha (CSV)",
+                                    data=csv_pedido,
+                                    file_name=nome_csv_final,
+                                    mime="text/csv",
+                                    key=f"dl_comp_{pedido_selecionado}",
+                                )
+                            with c_imp:
+                                if st.button("Imprimir / salvar PDF", key=f"print_comp_{pedido_selecionado}"):
+                                    st.info(f"Na impressão, use **Salvar como PDF**. O nome sugerido do arquivo é **{nome_html.replace('.html', '.pdf')}**.")
+                                    st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif modo_aba2 == "💰 Centro de Custos e Orçamento (Efetivo)":
                         st.write("### 💰 Centro de Custos e Orçamento (Baseado nas Entregas Efetivas)")
@@ -1391,60 +1509,78 @@ with aba2:
 
                             df_rel_final = df_rel_final.sort_values(by="Qtd Solicitada", ascending=False).reset_index(drop=True)
 
-                            st.markdown(f"""
-                            <div style="border: 2px solid #333; padding: 25px; border-radius: 8px; background-color: #ffffff;">
-                                <h3 style="text-align: center; color: #222; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
-                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{titulo_rel_oficial}</h4>
-                                <hr style="border: 0.5px solid #ccc;">
-                                <p style="margin: 5px 0;"><b>Distrito / Unidade:</b> {dist_imp_esc} / {ubs_imp}</p>
-                                <p style="margin: 5px 0;"><b>Período Abrangido:</b> {periodo_imp}</p>
-                                <p style="margin: 5px 0;"><b>Data de Emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            st.write(f"**1. Relação Consolidada (Demanda vs Despacho):**")
-                            st.dataframe(df_rel_final, use_container_width=True, hide_index=True)
-                            
+                            if st.session_state.perfil == "GESTAO":
+                                modelo_oficial = st.radio(
+                                    "Modelo de impressão do relatório",
+                                    ["Sem valores (via operacional)", "Com custos (via gerencial)"],
+                                    horizontal=True,
+                                    key="modelo_imp_oficial",
+                                )
+                                sem_custo_oficial = modelo_oficial.startswith("Sem valores")
+                            else:
+                                sem_custo_oficial = True
+
+                            df_print = df_rel_final.copy()
+                            if sem_custo_oficial:
+                                df_print = df_print.drop(columns=[c for c in df_print.columns if "Custo" in str(c)], errors="ignore")
+
                             custo_global_periodo = df_imp["custo_total"].sum() if "custo_total" in df_imp.columns else 0.0
-                            custo_global_str = f"R$ {custo_global_periodo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                            custo_global_str = formatar_moeda_br(custo_global_periodo)
                             total_geral_pedidas = df_rel_final["Qtd Solicitada"].sum()
                             total_geral_entregues = df_rel_final["Qtd Entregue"].sum()
-                            
-                            escopo_texto = f"categoria <b>{cat_escolhida_imp}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
-                            
-                            if st.session_state.perfil == "GESTAO":
+                            escopo_texto = f"categoria <b>{html_seguro(cat_escolhida_imp)}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
+                            via_txt = " (via operacional — sem valores)" if sem_custo_oficial else " (via gerencial — com custos)"
+
+                            if st.session_state.perfil == "GESTAO" and not sem_custo_oficial:
                                 parecer_tecnico = (
                                     f"O presente relatório oficial demonstra o comparativo entre a demanda solicitada e os quantitativos efetivamente entregues referentes ao {escopo_texto} "
-                                    f"para o distrito/unidade (**{dist_imp_esc} / {ubs_imp}**), considerando o período de <b>{periodo_imp}</b>. "
+                                    f"para o distrito/unidade (<b>{html_seguro(dist_imp_esc)} / {html_seguro(ubs_imp)}</b>), considerando o período de <b>{html_seguro(periodo_imp)}</b>. "
                                     f"Registrou-se um total de <b>{int(total_geral_pedidas)} unidades solicitadas</b> frente a <b>{int(total_geral_entregues)} unidades efetivamente entregues</b>, "
-                                    f"totalizando um **custo efetivo de {custo_global_str}** para o centro de custos. "
-                                    f"As variações identificadas entre o solicitado e o entregue refletem a gestão de estoque e a disponibilidade do almoxarifado central."
+                                    f"totalizando um <b>custo efetivo de {custo_global_str}</b> para o centro de custos."
                                 )
                             else:
                                 parecer_tecnico = (
                                     f"O presente relatório oficial demonstra o comparativo entre a demanda solicitada e os quantitativos efetivamente entregues referentes ao {escopo_texto} "
-                                    f"para a unidade <b>{ubs_imp}</b>, considerando o período de <b>{periodo_imp}</b>. "
+                                    f"para a unidade <b>{html_seguro(ubs_imp)}</b>, considerando o período de <b>{html_seguro(periodo_imp)}</b>. "
                                     f"Registrou-se um total de <b>{int(total_geral_pedidas)} unidades solicitadas</b> frente a <b>{int(total_geral_entregues)} unidades efetivamente entregues</b>."
                                 )
 
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            st.write("**2. Parecer Técnico / Administrativo Preliminar:**")
-                            st.markdown(f"""
-                            <div style="border: 1px solid #7f8c8d; padding: 15px; border-radius: 6px; background-color: #fcfcfc;">
-                                <p style="text-align: justify; color: #2c3e50; font-size: 14px; line-height: 1.6; margin: 0;">
-                                    {parecer_tecnico}
-                                </p>
+                            nome_rel = nome_arquivo_pedido(
+                                f"Relatorio-{tipo_imp_oficial}",
+                                ubs_imp,
+                                datetime.now(),
+                                extensao="html",
+                            )
+                            nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
+                            html_relatorio = f"""
+                            <div class="area-impressao" style="border: 2px solid #333; padding: 25px; background-color: #ffffff;">
+                                <h3 style="text-align: center; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
+                                <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{html_seguro(titulo_rel_oficial)}{via_txt}</h4>
+                                <p><b>Distrito / Unidade:</b> {html_seguro(dist_imp_esc)} / {html_seguro(ubs_imp)}</p>
+                                <p><b>Período abrangido:</b> {html_seguro(periodo_imp)}</p>
+                                <p><b>Data de emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                                <p><b>1. Relação consolidada (demanda vs despacho):</b></p>
+                                {tabela_html}
+                                <p style="margin-top:16px;"><b>2. Parecer técnico / administrativo preliminar:</b></p>
+                                <p style="text-align:justify;border:1px solid #7f8c8d;padding:12px;">{parecer_tecnico}</p>
+                                <p style="margin-top:36px;">____________________________________________________</p>
+                                <p>Assinatura e carimbo do responsável / Gestão do Almoxarifado</p>
                             </div>
-                            """, unsafe_allow_html=True)
-                            
-                            st.markdown("<br><br>", unsafe_allow_html=True)
-                            st.markdown("____________________________________________________")
-                            st.markdown("Assinatura e Carimbo do Responsável / Gestão do Almoxarifado")
-                            st.markdown("<br>", unsafe_allow_html=True)
-
-                            if st.button("🖨️ Imprimir ou Salvar Relatório Oficial em PDF", key="btn_print_rel_oficial"):
-                                st.info("💡 **Dica:** Na janela de impressão, altere o destino para **'Salvar como PDF'** se preferir o arquivo digital.")
-                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+                            """
+                            st.markdown(html_relatorio, unsafe_allow_html=True)
+                            st.caption(f"Nome do arquivo: `{nome_rel}`")
+                            c_dl_rel, c_imp_rel = st.columns(2)
+                            with c_dl_rel:
+                                st.download_button(
+                                    "Baixar relatório",
+                                    data=documento_html_completo(html_relatorio, nome_rel.replace(".html", "")),
+                                    file_name=nome_rel,
+                                    mime="text/html",
+                                    key="dl_rel_oficial_html",
+                                )
+                            with c_imp_rel:
+                                if st.button("Imprimir / salvar PDF", key="btn_print_rel_oficial"):
+                                    st.info(f"Na impressão, use **Salvar como PDF**. O nome sugerido do arquivo é **{nome_rel.replace('.html', '.pdf')}**.")
+                                    st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
