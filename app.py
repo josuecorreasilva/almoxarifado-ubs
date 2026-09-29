@@ -4,6 +4,8 @@ import time
 import re
 import unicodedata
 from datetime import datetime
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 from supabase import create_client, Client
 
 # ==========================================
@@ -15,27 +17,39 @@ st.set_page_config(page_title="SisPAC — SMS Pelotas", page_icon="🏥", layout
 st.markdown("""
     <style>
     @media print {
-        @page { margin: 12mm; }
-        [data-testid="stSidebar"],
-        header,
-        [data-testid="stHeader"],
-        [data-testid="stToolbar"],
-        [data-testid="stDecoration"],
-        [data-baseweb="tab-list"],
-        [role="tablist"],
-        .nao-imprimir {
-            display: none !important;
+        @page { size: A4; margin: 12mm; }
+        html, body, .stApp, [data-testid="stAppViewContainer"],
+        [data-testid="stMain"], .main, .block-container {
+            height: auto !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
         }
-        body * { visibility: hidden !important; }
-        .area-impressao, .area-impressao * { visibility: visible !important; }
+        body * { display: none !important; }
+        .area-impressao,
+        .area-impressao * {
+            display: revert !important;
+            visibility: visible !important;
+        }
         .area-impressao {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            background: white;
+            display: block !important;
+            position: static !important;
+            inset: auto !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            background: white !important;
+            page-break-before: avoid !important;
         }
-        body { background: white !important; }
+        .area-impressao table { display: table !important; width: 100% !important; }
+        .area-impressao thead { display: table-header-group !important; }
+        .area-impressao tbody { display: table-row-group !important; }
+        .area-impressao tr { display: table-row !important; }
+        .area-impressao th, .area-impressao td { display: table-cell !important; }
+        .area-impressao h3, .area-impressao h4, .area-impressao p { display: block !important; }
     }
     .area-impressao table {
         width: 100%;
@@ -49,6 +63,31 @@ st.markdown("""
         text-align: left;
     }
     .area-impressao th { background: #f2f2f2; }
+    .bloco-assinaturas {
+        display: flex;
+        gap: 36px;
+        margin-top: 48px;
+        page-break-inside: avoid;
+    }
+    .campo-assinatura {
+        flex: 1;
+        text-align: center;
+    }
+    .campo-assinatura .linha {
+        border-top: 1px solid #333;
+        margin: 42px 12px 8px 12px;
+    }
+    .campo-assinatura p {
+        margin: 0;
+        font-size: 12px;
+        color: #222;
+    }
+    .campo-assinatura span {
+        display: block;
+        margin-top: 2px;
+        font-size: 11px;
+        color: #666;
+    }
     .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1400px; }
     [data-testid="stSidebar"] { background: #f4f7f8; }
     [data-testid="stHeader"] { background: transparent; }
@@ -217,23 +256,158 @@ def aplicar_sufixo_arquivo(nome_arquivo, sufixo):
     return f"{raiz}_{sufixo}.{ext}"
 
 
-def documento_html_completo(corpo_html, titulo):
-    return f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<title>{html_seguro(titulo)}</title>
-<style>
-body {{ font-family: Arial, sans-serif; color: #222; margin: 24px; }}
-table {{ width: 100%; border-collapse: collapse; margin: 8px 0 16px 0; font-size: 13px; }}
-th, td {{ border: 1px solid #999; padding: 6px 8px; text-align: left; }}
-th {{ background: #f2f2f2; }}
-</style>
-</head>
-<body>
-{corpo_html}
-</body>
-</html>""".encode("utf-8")
+def texto_pdf(valor):
+    texto = str(valor if valor is not None else "")
+    return texto.encode("latin-1", "replace").decode("latin-1")
+
+
+class PdfSisPAC(FPDF):
+    def footer(self):
+        self.set_y(-12)
+        self.set_font("Helvetica", "I", 8)
+        self.cell(0, 6, texto_pdf(f"SisPAC - pagina {self.page_no()}"), align="C")
+
+
+def pdf_para_bytes(pdf):
+    saida = pdf.output()
+    if isinstance(saida, (bytes, bytearray)):
+        return bytes(saida)
+    return str(saida).encode("latin-1")
+
+
+def pdf_celula(pdf, largura, altura, texto, negrito=False, alinhar="L"):
+    pdf.set_font("Helvetica", "B" if negrito else "", 8)
+    limite = max(largura - 2, 8)
+    conteudo = texto_pdf(texto)
+    while pdf.get_string_width(conteudo) > limite and len(conteudo) > 3:
+        conteudo = conteudo[:-4] + "..."
+    pdf.cell(largura, altura, conteudo, border=1, align=alinhar)
+
+
+def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
+    pdf = PdfSisPAC(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, texto_pdf("SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.set_font("Helvetica", "B", 11)
+    via = "via operacional - sem valores" if sem_custo else "via gerencial - com custos"
+    pdf.cell(0, 7, texto_pdf(f"Comprovante de Requisicao e Entrega - SisPAC ({via})"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "", 10)
+    campos = [
+        ("No do Pedido", detalhes["numero_pedido"].iloc[0] if "numero_pedido" in detalhes.columns else ""),
+        ("Data/Hora do envio", detalhes["data"].iloc[0]),
+        ("Distrito", detalhes["distrito"].iloc[0]),
+        ("Unidade (UBS)", detalhes["ubs"].iloc[0]),
+        ("Status", status_atual),
+    ]
+    for rotulo, valor in campos:
+        pdf.cell(0, 6, texto_pdf(f"{rotulo}: {valor}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
+        obs = str(detalhes["observacao"].iloc[0]).strip()
+        if obs:
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(0, 6, texto_pdf("Observacoes:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.multi_cell(0, 5, texto_pdf(obs))
+    pdf.ln(2)
+    custo_total = 0.0
+    for cat in detalhes["categoria"].unique():
+        df_cat = detalhes[detalhes["categoria"] == cat]
+        pdf.set_font("Helvetica", "B", 10)
+        if sem_custo:
+            pdf.cell(0, 7, texto_pdf(f"Categoria: {cat}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            larguras = [118, 36, 36]
+            titulos = ["Material", "Solicitado", "Entregue"]
+        else:
+            subtotal = float(df_cat["custo_total"].sum()) if "custo_total" in df_cat.columns else 0.0
+            custo_total += subtotal
+            pdf.cell(0, 7, texto_pdf(f"Categoria: {cat}  |  Subtotal: {formatar_moeda_br(subtotal)}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            larguras = [78, 22, 22, 34, 34]
+            titulos = ["Material", "Solic.", "Entregue", "Vl. unitario", "Custo"]
+        for titulo, largura in zip(titulos, larguras):
+            pdf_celula(pdf, largura, 7, titulo, negrito=True, alinhar="C")
+        pdf.ln()
+        for _, linha in df_cat.iterrows():
+            if pdf.get_y() > 265:
+                pdf.add_page()
+            valores = [
+                linha["material"],
+                parse_numero(linha["quantidade"], True),
+                parse_numero(linha.get("quantidade_entregue"), True),
+            ]
+            if not sem_custo:
+                valores.extend([
+                    formatar_moeda_br(linha.get("valor_unitario", 0)),
+                    formatar_moeda_br(linha.get("custo_total", 0)),
+                ])
+            for valor, largura in zip(valores, larguras):
+                pdf_celula(pdf, largura, 6, valor)
+            pdf.ln()
+        pdf.ln(2)
+    if not sem_custo:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, texto_pdf(f"Custo total efetivo: {formatar_moeda_br(custo_total)}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf_bloco_assinaturas(
+        pdf,
+        "Almoxarifado Central",
+        "Assinatura e carimbo",
+        "Recebimento na UBS",
+        "Assinatura do responsavel",
+    )
+    return pdf_para_bytes(pdf)
+
+
+def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
+    pdf = PdfSisPAC(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, texto_pdf("SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.multi_cell(0, 6, texto_pdf(titulo), align="C")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, texto_pdf(f"Distrito / Unidade: {distrito} / {ubs}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, texto_pdf(f"Periodo abrangido: {periodo}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, texto_pdf(f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    colunas = [str(c) for c in df_print.columns]
+    n = max(len(colunas), 1)
+    largura_util = 190
+    larguras = [largura_util / n] * n
+    if "Material" in colunas:
+        idx = colunas.index("Material")
+        larguras[idx] = min(80, largura_util * 0.42)
+        resto = largura_util - larguras[idx]
+        outros = [i for i in range(n) if i != idx]
+        if outros:
+            largura_outro = resto / len(outros)
+            for i in outros:
+                larguras[i] = largura_outro
+    for titulo_col, largura in zip(colunas, larguras):
+        pdf_celula(pdf, largura, 7, titulo_col, negrito=True, alinhar="C")
+    pdf.ln()
+    for _, linha in df_print.iterrows():
+        if pdf.get_y() > 265:
+            pdf.add_page()
+        for coluna, largura in zip(colunas, larguras):
+            pdf_celula(pdf, largura, 6, linha[coluna])
+        pdf.ln()
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, texto_pdf("Parecer tecnico / administrativo preliminar:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    parecer_limpo = re.sub(r"<[^>]+>", "", str(parecer))
+    pdf.multi_cell(0, 5, texto_pdf(parecer_limpo))
+    pdf_bloco_assinaturas(
+        pdf,
+        "Gestao do Almoxarifado",
+        "Assinatura e carimbo",
+    )
+    return pdf_para_bytes(pdf)
 
 
 def html_seguro(texto):
@@ -243,6 +417,56 @@ def html_seguro(texto):
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+
+
+def html_bloco_assinaturas(esquerda_titulo, esquerda_legenda, direita_titulo, direita_legenda):
+    return f"""
+    <div class="bloco-assinaturas">
+        <div class="campo-assinatura">
+            <div class="linha"></div>
+            <p>{html_seguro(esquerda_titulo)}</p>
+            <span>{html_seguro(esquerda_legenda)}</span>
+        </div>
+        <div class="campo-assinatura">
+            <div class="linha"></div>
+            <p>{html_seguro(direita_titulo)}</p>
+            <span>{html_seguro(direita_legenda)}</span>
+        </div>
+    </div>
+    """
+
+
+def pdf_bloco_assinaturas(pdf, esquerda_titulo, esquerda_legenda, direita_titulo=None, direita_legenda=None):
+    if pdf.get_y() > 245:
+        pdf.add_page()
+    pdf.ln(16)
+    y = pdf.get_y() + 18
+    if direita_titulo:
+        pdf.line(20, y, 95, y)
+        pdf.line(115, y, 190, y)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_xy(20, y + 3)
+        pdf.cell(75, 5, texto_pdf(esquerda_titulo), align="C")
+        pdf.set_xy(20, y + 8)
+        pdf.set_text_color(90, 90, 90)
+        pdf.cell(75, 5, texto_pdf(esquerda_legenda), align="C")
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(115, y + 3)
+        pdf.cell(75, 5, texto_pdf(direita_titulo), align="C")
+        pdf.set_xy(115, y + 8)
+        pdf.set_text_color(90, 90, 90)
+        pdf.cell(75, 5, texto_pdf(direita_legenda), align="C")
+        pdf.set_text_color(0, 0, 0)
+    else:
+        pdf.line(55, y, 155, y)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_xy(55, y + 3)
+        pdf.cell(100, 5, texto_pdf(esquerda_titulo), align="C")
+        pdf.set_xy(55, y + 8)
+        pdf.set_text_color(90, 90, 90)
+        pdf.cell(100, 5, texto_pdf(esquerda_legenda), align="C")
+        pdf.set_text_color(0, 0, 0)
+    pdf.set_y(y + 16)
 
 
 def formatar_moeda_br(valor):
@@ -303,7 +527,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         f"<b>Observações:</b><br>{html_seguro(obs)}</p>" if obs else ""
     )
     return f"""
-    <div class="area-impressao" style="border:2px solid #333;padding:20px;background:#fff;">
+    <div class="area-impressao" style="padding:8px;background:#fff;">
         <h3 style="text-align:center;margin:0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
         <h4 style="text-align:center;color:#555;margin:6px 0 16px 0;">Comprovante de Requisição e Entrega — SisPAC{titulo_extra}</h4>
         <p><b>Nº do Pedido:</b> {html_seguro(detalhes['numero_pedido'].iloc[0] if 'numero_pedido' in detalhes.columns else '')}</p>
@@ -314,8 +538,12 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         {obs_html}
         {''.join(blocos)}
         {rodape_custo}
-        <p style="margin-top:36px;">____________________________________________________</p>
-        <p>Assinatura do responsável / recebimento na UBS</p>
+        {html_bloco_assinaturas(
+            "Almoxarifado Central",
+            "Assinatura e carimbo",
+            "Recebimento na UBS",
+            "Assinatura do responsável",
+        )}
     </div>
     """
 
@@ -1196,15 +1424,18 @@ with aba2:
                             html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
                             st.markdown(html_pedido, unsafe_allow_html=True)
 
-                            nome_base = nome_arquivo_pedido(
-                                pedido_selecionado,
-                                detalhes["ubs"].iloc[0],
-                                detalhes["data"].iloc[0],
-                                extensao="html",
-                            )
                             sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
-                            nome_html = aplicar_sufixo_arquivo(nome_base, sufixo_via)
-                            nome_csv_final = aplicar_sufixo_arquivo(nome_base.replace(".html", ".csv"), sufixo_via)
+                            nome_pdf = aplicar_sufixo_arquivo(
+                                nome_arquivo_pedido(
+                                    pedido_selecionado,
+                                    detalhes["ubs"].iloc[0],
+                                    detalhes["data"].iloc[0],
+                                    extensao="pdf",
+                                ),
+                                sufixo_via,
+                            )
+                            nome_csv_final = nome_pdf.replace(".pdf", ".csv")
+                            pdf_bytes = gerar_pdf_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
 
                             csv_cols = [c for c in ["numero_pedido", "data", "distrito", "ubs", "categoria", "material", "quantidade", "quantidade_entregue", "status", "observacao"] if c in detalhes.columns]
                             if sem_custo_print and csv_cols:
@@ -1212,17 +1443,15 @@ with aba2:
                             else:
                                 csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
 
-                            arquivo_html = documento_html_completo(html_pedido, nome_html.replace(".html", ""))
-                            st.caption(f"Nome do arquivo: `{nome_html}`")
-
-                            c_html, c_csv, c_imp = st.columns(3)
-                            with c_html:
+                            st.caption(f"Nome do arquivo: `{nome_pdf}`")
+                            c_pdf, c_csv, c_imp = st.columns(3)
+                            with c_pdf:
                                 st.download_button(
-                                    "Baixar comprovante",
-                                    data=arquivo_html,
-                                    file_name=nome_html,
-                                    mime="text/html",
-                                    key=f"dl_html_{pedido_selecionado}",
+                                    "Baixar comprovante em PDF",
+                                    data=pdf_bytes,
+                                    file_name=nome_pdf,
+                                    mime="application/pdf",
+                                    key=f"dl_pdf_{pedido_selecionado}",
                                 )
                             with c_csv:
                                 st.download_button(
@@ -1233,8 +1462,7 @@ with aba2:
                                     key=f"dl_comp_{pedido_selecionado}",
                                 )
                             with c_imp:
-                                if st.button("Imprimir / salvar PDF", key=f"print_comp_{pedido_selecionado}"):
-                                    st.info(f"Na impressão, use **Salvar como PDF**. O nome sugerido do arquivo é **{nome_html.replace('.html', '.pdf')}**.")
+                                if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif modo_aba2 == "💰 Centro de Custos e Orçamento (Efetivo)":
@@ -1549,11 +1777,11 @@ with aba2:
                                 f"Relatorio-{tipo_imp_oficial}",
                                 ubs_imp,
                                 datetime.now(),
-                                extensao="html",
+                                extensao="pdf",
                             )
                             nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
                             html_relatorio = f"""
-                            <div class="area-impressao" style="border: 2px solid #333; padding: 25px; background-color: #ffffff;">
+                            <div class="area-impressao" style="padding: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
                                 <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{html_seguro(titulo_rel_oficial)}{via_txt}</h4>
                                 <p><b>Distrito / Unidade:</b> {html_seguro(dist_imp_esc)} / {html_seguro(ubs_imp)}</p>
@@ -1563,24 +1791,35 @@ with aba2:
                                 {tabela_html}
                                 <p style="margin-top:16px;"><b>2. Parecer técnico / administrativo preliminar:</b></p>
                                 <p style="text-align:justify;border:1px solid #7f8c8d;padding:12px;">{parecer_tecnico}</p>
-                                <p style="margin-top:36px;">____________________________________________________</p>
-                                <p>Assinatura e carimbo do responsável / Gestão do Almoxarifado</p>
+                                {html_bloco_assinaturas(
+                                    "Gestão do Almoxarifado",
+                                    "Assinatura e carimbo",
+                                    "Ciência da unidade",
+                                    "Assinatura do responsável",
+                                )}
                             </div>
                             """
                             st.markdown(html_relatorio, unsafe_allow_html=True)
                             st.caption(f"Nome do arquivo: `{nome_rel}`")
+                            pdf_rel = gerar_pdf_relatorio(
+                                df_print,
+                                f"{titulo_rel_oficial}{via_txt}",
+                                dist_imp_esc,
+                                ubs_imp,
+                                periodo_imp,
+                                parecer_tecnico,
+                            )
                             c_dl_rel, c_imp_rel = st.columns(2)
                             with c_dl_rel:
                                 st.download_button(
-                                    "Baixar relatório",
-                                    data=documento_html_completo(html_relatorio, nome_rel.replace(".html", "")),
+                                    "Baixar relatório em PDF",
+                                    data=pdf_rel,
                                     file_name=nome_rel,
-                                    mime="text/html",
-                                    key="dl_rel_oficial_html",
+                                    mime="application/pdf",
+                                    key="dl_rel_oficial_pdf",
                                 )
                             with c_imp_rel:
-                                if st.button("Imprimir / salvar PDF", key="btn_print_rel_oficial"):
-                                    st.info(f"Na impressão, use **Salvar como PDF**. O nome sugerido do arquivo é **{nome_rel.replace('.html', '.pdf')}**.")
+                                if st.button("Imprimir", key="btn_print_rel_oficial"):
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
