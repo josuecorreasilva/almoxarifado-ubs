@@ -10,18 +10,38 @@ from supabase import create_client, Client
 # 1. CONFIGURAÇÕES INICIAIS
 # ==========================================
 # POR QUE: Define como a página vai aparecer na aba do navegador e usa a tela toda (layout wide)
-st.set_page_config(page_title="Almoxarifado Saúde", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="SisPAC — SMS Pelotas", page_icon="🏥", layout="wide")
 
 st.markdown("""
     <style>
     @media print {
-        /* Oculta a barra lateral, cabeçalhos do Streamlit, botões e elementos marcados na hora de imprimir */
         [data-testid="stSidebar"], header, button, .stButton, .nao-imprimir {
             display: none !important;
         }
-        body {
-            background-color: white;
-        }
+        body { background-color: white; }
+    }
+    .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1400px; }
+    [data-testid="stSidebar"] { background: #f4f7f8; }
+    [data-testid="stHeader"] { background: transparent; }
+    .sispac-header {
+        background: linear-gradient(90deg, #0e4d56 0%, #1a6b75 100%);
+        color: #fff;
+        border-radius: 10px;
+        padding: 14px 22px;
+        margin-bottom: 8px;
+    }
+    .sispac-header h1 { font-size: 1.35rem; margin: 0; font-weight: 650; color: #fff; }
+    .sispac-header p { margin: 4px 0 0 0; font-size: 0.88rem; opacity: 0.9; }
+    .sispac-card {
+        background: #f8fbfb;
+        border: 1px solid #d5e4e6;
+        border-radius: 10px;
+        padding: 8px 4px 4px 4px;
+        margin-bottom: 8px;
+    }
+    div.stButton > button[kind="primary"] {
+        background: #0e4d56;
+        border: 0;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -46,8 +66,10 @@ distritos_ubs = {
 # POR QUE: Link para puxar a lista de materiais ao vivo do seu Google Sheets. 
 url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
 
-MATERIAIS_INVALIDOS = {"Erro", "Selecione Categoria", "Nenhuma", "Sem itens", ""}
-LIMIAR_ESTOQUE_BAIXO = 50
+MATERIAIS_INVALIDOS = {
+    "Erro", "Selecione Categoria", "Selecione a categoria", "Selecione o material",
+    "Nenhuma", "Sem itens", "",
+}
 LIMIAR_ESTOQUE_BAIXO = 50
 
 
@@ -385,26 +407,28 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
-    caixa_login = st.container()
-    with caixa_login:
-        st.subheader("🔒 Acesso Restrito")
-        
-        email_digitado = st.text_input("E-mail").lower().strip()
+    st.markdown(
+        "<div class='sispac-header'><h1>SisPAC</h1>"
+        "<p>Sistema de Pedidos do Almoxarifado Central — Secretaria Municipal de Saúde de Pelotas</p></div>",
+        unsafe_allow_html=True,
+    )
+    col_l1, col_l2, col_l3 = st.columns([1, 1.15, 1])
+    with col_l2:
+        st.markdown("#### Acesso institucional")
+        st.caption("Informe as credenciais da unidade ou da gestão do almoxarifado.")
+        email_digitado = st.text_input("E-mail institucional").lower().strip()
         senha_digitada = st.text_input("Senha", type="password")
         
-        if st.button("Entrar no Sistema"):
+        if st.button("Entrar", type="primary", use_container_width=True):
             try:
-                # O Python envia os dados para o cofre do Supabase validar
                 resposta = supabase.auth.sign_in_with_password({
                     "email": email_digitado,
                     "password": senha_digitada
                 })
                 
-                # Se a senha estiver correta, salva os dados básicos
                 st.session_state.autenticado = True
                 st.session_state.email_usuario = resposta.user.email
                 
-                # Regra que define quem enxerga o que:
                 if "ubs" in st.session_state.email_usuario.lower():
                     st.session_state.perfil = "UBS"
                     distrito_email, ubs_email = identificar_ubs_por_email(st.session_state.email_usuario)
@@ -415,19 +439,23 @@ if not st.session_state.autenticado:
                     st.session_state.ubs_nome = "Visão Global"
                     st.session_state.distrito_ubs = None
                 
-                st.rerun() # Atualiza a tela para liberar o sistema
+                st.rerun()
                 
             except Exception as e:
                 st.error("Credenciais inválidas. Verifique o e-mail e a senha.")
                 
-    st.stop() # Bloqueio de segurança 
+    st.stop() 
 
 # ==========================================
 # 4. BARRA LATERAL (MENU DE USUÁRIO)
 # ==========================================
-st.sidebar.write(f"👤 Acesso: **{st.session_state.email_usuario}**")
-st.sidebar.write(f"🏥 Perfil: {st.session_state.perfil}")
-if st.sidebar.button("Sair do Sistema"):
+st.sidebar.markdown("**SisPAC**")
+st.sidebar.caption("Almoxarifado Central · SMS Pelotas")
+st.sidebar.divider()
+st.sidebar.write(f"Usuário: **{st.session_state.email_usuario}**")
+perfil_legenda = "Gestão / Almoxarifado" if st.session_state.perfil == "GESTAO" else f"UBS {st.session_state.ubs_nome}"
+st.sidebar.write(f"Perfil: **{perfil_legenda}**")
+if st.sidebar.button("Encerrar sessão", use_container_width=True):
     supabase.auth.sign_out()
     st.session_state.autenticado = False
     st.rerun()
@@ -436,25 +464,27 @@ if st.sidebar.button("Sair do Sistema"):
 # 5. CABEÇALHO PRINCIPAL
 # ==========================================
 # POR QUE: st.columns divide a tela. [1, 1, 6] dita a largura: duas colunas finas para logos, uma enorme para o título.
-col_logo1, col_logo2, col_titulo = st.columns([1, 1, 6])
+col_logo1, col_logo2, col_titulo = st.columns([1, 1, 7])
 
 with col_logo1:
-    st.image("horizontalloggoverr.png", width=90) 
+    st.image("horizontalloggoverr.png", width=88)
     
 with col_logo2:
-    st.image("brasao-cidade-pelotas-rs.jpg", width=90)
+    st.image("brasao-cidade-pelotas-rs.jpg", width=88)
 
 with col_titulo:
-    st.markdown("### 📦 SisPAC (Sistema de Pedidos - Almoxarifado Central) - SMS<br>*(BD Profissional)*", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='sispac-header'><h1>SisPAC — Sistema de Pedidos do Almoxarifado Central</h1>"
+        "<p>Secretaria Municipal de Saúde de Pelotas</p></div>",
+        unsafe_allow_html=True,
+    )
 
-# ==========================================
-# 6. ABAS DO SISTEMA
-# ==========================================
-aba1, aba2 = st.tabs(["Fazer Novo Pedido", "Painel Gerencial"])
+aba1, aba2 = st.tabs(["Novo pedido", "Painel gerencial"])
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
 with aba1:
-    st.subheader("Formulário da Unidade Básica de Saúde")
+    st.markdown("#### Requisição de materiais")
+    st.caption("Preencha a unidade, escolha categoria e material e inclua os itens antes de enviar a requisição.")
     
     col_distrito, col_ubs = st.columns(2)
     
@@ -498,26 +528,33 @@ with aba1:
 
     saidas_conferidas = mapa_saidas_conferidas()
     saldos_lote, materiais_com_lote = mapa_estoque_lotes()
-        
-    categoria_selecionada = st.selectbox("1. Selecione a Categoria", lista_categorias)
+
+    opcoes_categoria = ["Selecione a categoria"] + [c for c in lista_categorias if c not in MATERIAIS_INVALIDOS]
+    categoria_selecionada = st.selectbox("Categoria", opcoes_categoria, index=0, key="sel_categoria_pedido")
     
-    if not df_materiais.empty and col_categoria and col_material:
+    if (
+        not df_materiais.empty
+        and col_categoria
+        and col_material
+        and categoria_selecionada not in MATERIAIS_INVALIDOS
+    ):
          df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada]
-         lista_de_itens = df_filtrado[col_material].dropna().tolist()
+         lista_de_itens = ["Selecione o material"] + df_filtrado[col_material].dropna().tolist()
     else:
-         lista_de_itens = ["Selecione Categoria"]
+         lista_de_itens = ["Selecione o material"]
          
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
         
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3 = st.columns([2.2, 1.4, 1.2])
     with col1:
-        material = st.selectbox("2. Selecione o Material", lista_de_itens)
+        material = st.selectbox("Material", lista_de_itens, index=0, key="sel_material_pedido")
         
+    material_valido = material not in MATERIAIS_INVALIDOS
     estoque_disponivel_total = 0
     valor_unitario_atual = 0.0
 
-    if not df_materiais.empty and material and col_material:
+    if material_valido and not df_materiais.empty and col_material:
         item_row = df_materiais[df_materiais[col_material] == material]
         if not item_row.empty:
             estoque_planilha = parse_numero(item_row[col_estoque].values[0], inteiro=True) if col_estoque else 0
@@ -528,28 +565,37 @@ with aba1:
                 valor_unitario_atual = parse_numero(item_row[col_preco].values[0])
 
     with col2:
-        if estoque_disponivel_total > 50:
-            st.markdown(f"**Estoque:** <span style='color: green;'>🟢 Disponível ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
+        if not material_valido:
+            st.markdown("**Disponibilidade**")
+            st.caption("Selecione um material para consultar o estoque.")
+        elif estoque_disponivel_total > LIMIAR_ESTOQUE_BAIXO:
+            st.markdown(f"**Disponibilidade:** <span style='color: #1e7a46;'>Regular ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
+            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
         elif estoque_disponivel_total > 0:
-            st.markdown(f"**Estoque:** <span style='color: orange;'>🟡 Baixo ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
+            st.markdown(f"**Disponibilidade:** <span style='color: #b86a00;'>Estoque reduzido ({estoque_disponivel_total} un.)</span>", unsafe_allow_html=True)
+            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
         else:
-            st.markdown(f"**Estoque:** <span style='color: red;'>🔴 Ruptura / Zero</span>", unsafe_allow_html=True)
-        st.caption("O saldo só cai depois da conferência do almoxarifado.")
+            st.markdown("**Disponibilidade:** <span style='color: #b42318;'>Indisponível</span>", unsafe_allow_html=True)
+            st.caption("A baixa no estoque ocorre somente após conferência e despacho pelo Almoxarifado Central.")
 
     with col3:
-        qtd_sugerida_form = quantidade_sugerida_pedido(estoque_disponivel_total)
-        quantidade = st.number_input(
-            "3. Quantidade Necessária",
-            min_value=1,
-            value=qtd_sugerida_form,
-            key=f"qtd_nec_{material}",
-        )
-        if 0 < estoque_disponivel_total <= LIMIAR_ESTOQUE_BAIXO:
-            st.caption(f"Sugerido **{qtd_sugerida_form} un.** (estoque baixo).")
-        elif estoque_disponivel_total <= 0:
-            st.caption("Sem saldo. A quantidade registra a demanda; o estoque não será baixado agora.")
+        if material_valido:
+            qtd_sugerida_form = quantidade_sugerida_pedido(estoque_disponivel_total)
+            quantidade = st.number_input(
+                "Quantidade",
+                min_value=1,
+                value=qtd_sugerida_form,
+                key=f"qtd_nec_{material}",
+            )
+            if 0 < estoque_disponivel_total <= LIMIAR_ESTOQUE_BAIXO:
+                st.caption(f"Sugestão: {qtd_sugerida_form} un. (estoque reduzido).")
+            elif estoque_disponivel_total <= 0:
+                st.caption("Sem saldo. A quantidade registra a demanda da unidade.")
+        else:
+            quantidade = 1
+            st.number_input("Quantidade", min_value=1, value=1, disabled=True, key="qtd_nec_placeholder")
         
-    if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
+    if st.button("Adicionar item", key="btn_adicionar_item"):
         if not material or material in MATERIAIS_INVALIDOS:
             st.error("Selecione um material válido antes de adicionar.")
         else:
@@ -580,14 +626,14 @@ with aba1:
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
-        st.markdown("---")
+        st.markdown("##### Itens da requisição")
         col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
         col_cab1.write("**UBS**")
         col_cab2.write("**Categoria**")
         col_cab3.write("**Material**")
         col_cab4.write("**Qtd**")
-        col_cab5.write("**Excluir**")
-        st.markdown("---")
+        col_cab5.write("")
+        st.divider()
         
         for i, item in enumerate(st.session_state.carrinho):
             c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
@@ -596,19 +642,17 @@ with aba1:
             c3.write(item["material"])
             c4.write(item["quantidade"])
             
-            if c5.button("🗑️", key=f"excluir_{i}_{item['material']}"):
+            if c5.button("Remover", key=f"excluir_{i}_{item['material']}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
-    st.markdown("---")
-    
     observacao_geral = st.text_area(
-        "📝 Observações Gerais (Opcional)", 
-        placeholder="Ex: Urgência na entrega, horário preferencial...",
+        "Observações (opcional)", 
+        placeholder="Informe urgência, horário de recebimento ou outras orientações à gestão.",
         key="input_observacao_geral"
     )
 
-    if st.button("✅ Enviar Pedido Completo", key="btn_enviar_pedido"):
+    if st.button("Enviar requisição", type="primary", key="btn_enviar_pedido"):
         if not st.session_state.carrinho:
             st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
         elif not supabase:
@@ -647,7 +691,8 @@ with aba1:
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
-    st.subheader("📊 Painel de Controle, Conferência e Relatórios")
+    st.markdown("#### Painel de controle")
+    st.caption("Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.")
     
     if not supabase:
         st.error("Banco de dados desconectado.")
