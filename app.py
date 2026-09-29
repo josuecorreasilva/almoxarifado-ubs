@@ -684,6 +684,7 @@ with aba2:
                 else:
                     # Opções de visualização adaptadas ao perfil
                     opcoes_visao = [
+                        "📥 Fila de Chegada (ordem de entrada)",
                         "📋 Acompanhar Pedidos, Conferência e Comprovantes", 
                         "📈 Relatórios Analíticos e Gráficos", 
                         "🖨️ Emitir Relatório Oficial (Imprimir)"
@@ -701,152 +702,202 @@ with aba2:
                     
                     st.markdown("---")
                     
-                    if modo_aba2 == "📋 Acompanhar Pedidos, Conferência e Comprovantes":
+                    if modo_aba2 in ("📥 Fila de Chegada (ordem de entrada)", "📋 Acompanhar Pedidos, Conferência e Comprovantes"):
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
                         pedidos_unicos = (
-                            df_supabase.sort_values(by="data", ascending=False)
+                            df_supabase.sort_values(by="data", ascending=True)
                             .drop_duplicates(subset=["numero_pedido"])
                             .reset_index(drop=True)
                         )
                         pedidos_unicos["status"] = pedidos_unicos["numero_pedido"].map(
                             lambda n: status_consolidado_pedido(df_supabase[df_supabase["numero_pedido"] == n])
                         )
-                        pedidos_unicos = pedidos_unicos[["numero_pedido", "data", "distrito", "ubs", "status"]]
-
-                        col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
-                        with col_f_st:
-                            filtro_status = st.selectbox(
-                                "Status",
-                                ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
-                                key="filtro_status_conf",
-                            )
-                        with col_f_dist:
-                            filtro_distrito = st.selectbox(
-                                "Distrito",
-                                ["Todos"] + list(distritos_ubs.keys()),
-                                key="filtro_dist_conf",
-                            )
-                        with col_f_ubs:
-                            ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
-                            filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
-                        with col_f_agr:
-                            if st.session_state.perfil == "GESTAO":
-                                agrupamento = st.selectbox(
-                                    "Agrupar conferência",
-                                    ["Por pedido", "Por UBS", "Por material (rateio)"],
-                                    key="agrupamento_conf",
-                                )
-                            else:
-                                agrupamento = "Por pedido"
-                                st.selectbox("Agrupar conferência", ["Por pedido"], disabled=True, key="agrupamento_conf_ubs")
-
-                        df_lista = pedidos_unicos.copy()
-                        if filtro_status != "Todos":
-                            df_lista = df_lista[df_lista["status"] == filtro_status]
-                        if filtro_distrito != "Todos":
-                            df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
-                        if filtro_ubs != "Todas":
-                            df_lista = df_lista[df_lista["ubs"] == filtro_ubs]
+                        qtd_itens_pedido = df_supabase.groupby("numero_pedido")["material"].count().to_dict()
+                        pedidos_unicos["itens"] = pedidos_unicos["numero_pedido"].map(lambda n: int(qtd_itens_pedido.get(n, 0)))
+                        pedidos_unicos = pedidos_unicos[["numero_pedido", "data", "distrito", "ubs", "status", "itens"]]
 
                         pedido_selecionado = "Selecione..."
-                        conferencia_por_material = agrupamento == "Por material (rateio)" and st.session_state.perfil == "GESTAO"
+                        conferencia_por_material = False
 
-                        if conferencia_por_material:
-                            st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
-                            st.caption("Quando várias UBS pedem o mesmo item com estoque baixo, o sistema sugere a divisão proporcional do saldo.")
-                            pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
-                            if filtro_distrito != "Todos":
-                                pendentes = pendentes[pendentes["distrito"] == filtro_distrito]
-                            if filtro_ubs != "Todas":
-                                pendentes = pendentes[pendentes["ubs"] == filtro_ubs]
-                            materiais_pendentes = sorted(pendentes["material"].dropna().astype(str).str.strip().unique().tolist()) if not pendentes.empty else []
-                            material_rateio = st.selectbox("Material para conferir", ["Selecione..."] + materiais_pendentes, key="mat_rateio_conf")
-                            if material_rateio != "Selecione..." and not pendentes.empty:
-                                linhas_mat = pendentes[pendentes["material"].astype(str).str.strip() == material_rateio].copy()
-                                saidas_conf = mapa_saidas_conferidas()
-                                saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
-                                mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
-                                estoque_atual = estoque_visivel(
-                                    material_rateio,
-                                    mapa_planilha_conf.get(material_rateio, 0),
-                                    saidas_conf,
-                                    saldos_lote_conf,
-                                    materiais_lote_conf,
+                        if modo_aba2 == "📥 Fila de Chegada (ordem de entrada)":
+                            st.markdown("### 📥 Fila de Chegada")
+                            st.caption("Área independente dos filtros. Os pedidos aparecem na ordem em que chegaram (do mais antigo ao mais recente), com identificação da unidade.")
+
+                            col_fila_1, col_fila_2 = st.columns([2, 1])
+                            with col_fila_1:
+                                so_pendentes = st.checkbox(
+                                    "Mostrar só os que aguardam conferência",
+                                    value=(st.session_state.perfil == "GESTAO"),
+                                    key="fila_so_pendentes",
                                 )
-                                qtds_pedidas = [parse_numero(q, inteiro=True) for q in linhas_mat["quantidade"].tolist()]
-                                sugestoes = sugerir_rateio(qtds_pedidas, estoque_atual)
-                                demanda_total = sum(qtds_pedidas)
-                                m1, m2, m3 = st.columns(3)
-                                m1.metric("Estoque atual", f"{estoque_atual} un.")
-                                m2.metric("Demanda pendente", f"{demanda_total} un.")
-                                m3.metric("UBS solicitantes", linhas_mat["ubs"].nunique())
-                                if demanda_total > estoque_atual:
-                                    st.warning("Estoque insuficiente para atender todas as unidades. As quantidades sugeridas já estão rateadas.")
 
-                                with st.form(key=f"form_rateio_{material_rateio}"):
-                                    novas_quantidades_entregues = {}
-                                    for i, (idx, row) in enumerate(linhas_mat.iterrows()):
-                                        qtd_pedida = parse_numero(row["quantidade"], inteiro=True)
-                                        max_entregue = max(0, min(qtd_pedida, estoque_atual if demanda_total <= estoque_atual else qtd_pedida))
-                                        sugerido = min(sugestoes[i] if i < len(sugestoes) else 0, max_entregue)
-                                        c1, c2, c3, c4 = st.columns([1.3, 2.2, 1, 1])
-                                        c1.write(f"**{row['ubs']}**")
-                                        c2.write(f"{row['numero_pedido']}")
-                                        c3.write(f"Pediu: {qtd_pedida}")
-                                        val_entregue = c4.number_input(
-                                            f"Entregar ({row['ubs']})",
-                                            min_value=0,
-                                            max_value=qtd_pedida,
-                                            value=sugerido,
-                                            key=f"rateio_{row['id'] if 'id' in row else idx}",
-                                        )
-                                        novas_quantidades_entregues[row["id"] if "id" in row else idx] = val_entregue
-                                    obs_gestao = st.text_input("Observação da Gestão (Opcional)", key=f"obs_rateio_{material_rateio}")
-                                    btn_salvar_rateio = st.form_submit_button("💾 Salvar rateio e baixar estoque")
-                                    if btn_salvar_rateio:
-                                        try:
-                                            soma_entrega = sum(novas_quantidades_entregues.values())
-                                            if soma_entrega > estoque_atual:
-                                                st.error(f"A soma entregue ({soma_entrega}) ultrapassa o estoque ({estoque_atual}). Ajuste o rateio.")
-                                            else:
-                                                atualizacoes = []
-                                                for row_id, nova_qtd in novas_quantidades_entregues.items():
-                                                    row_original = linhas_mat[linhas_mat["id"] == row_id].iloc[0] if "id" in linhas_mat.columns else linhas_mat.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
-                                                    atualizacoes.append((row_id, nova_qtd, row_original))
-                                                persistir_entregas(atualizacoes, (obs_gestao or "").strip())
-                                                st.success("Rateio salvo. Estoque baixado com o total entregue deste material.")
-                                                st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao salvar rateio: {e}")
+                            df_fila = pedidos_unicos.copy()
+                            if so_pendentes:
+                                df_fila = df_fila[df_fila["status"] == "Pedido enviado"]
+                            df_fila = df_fila.sort_values(by="data", ascending=True).reset_index(drop=True)
+                            df_fila.insert(0, "ordem", range(1, len(df_fila) + 1))
+                            df_fila_exibir = df_fila.rename(columns={
+                                "ordem": "Ordem de chegada",
+                                "numero_pedido": "Identificação do pedido",
+                                "data": "Data/hora",
+                                "distrito": "Distrito",
+                                "ubs": "UBS",
+                                "status": "Status",
+                                "itens": "Itens",
+                            })
+                            with col_fila_2:
+                                st.metric("Pedidos na fila", len(df_fila_exibir))
 
-                            st.markdown("---")
-                            st.write("**Fila de pedidos (para comprovante):**")
-                            st.dataframe(df_lista, use_container_width=True, hide_index=True)
-                            lista_opcoes = ["Selecione..."] + list(df_lista["numero_pedido"].unique())
-                            pedido_selecionado = st.selectbox("Abrir comprovante de um pedido:", lista_opcoes, key="pedido_comp_rateio")
+                            if df_fila_exibir.empty:
+                                st.info("Não há pedidos nesta fila no momento.")
+                            else:
+                                st.dataframe(df_fila_exibir, use_container_width=True, hide_index=True)
+
+                                mapa_fila = {
+                                    f"#{int(row['Ordem de chegada']):02d} | {row['UBS']} | {row['Identificação do pedido']} | {row['Data/hora']} | {row['Status']}": row["Identificação do pedido"]
+                                    for _, row in df_fila_exibir.iterrows()
+                                }
+                                rotulo_fila = st.selectbox(
+                                    "Abrir pedido da fila (do primeiro que chegou ao último):",
+                                    ["Selecione..."] + list(mapa_fila.keys()),
+                                    key="select_fila_chegada",
+                                )
+                                pedido_selecionado = mapa_fila.get(rotulo_fila, "Selecione...")
                         else:
-                            if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
-                                ubs_grupo = st.selectbox(
-                                    "Escolha a UBS para ver os pedidos agrupados",
-                                    ["Selecione..."] + sorted(df_lista["ubs"].dropna().astype(str).unique().tolist()),
-                                    key="ubs_grupo_conf",
+                            col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
+                            with col_f_st:
+                                filtro_status = st.selectbox(
+                                    "Status",
+                                    ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                    key="filtro_status_conf",
                                 )
-                                if ubs_grupo != "Selecione...":
-                                    df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
+                            with col_f_dist:
+                                filtro_distrito = st.selectbox(
+                                    "Distrito",
+                                    ["Todos"] + list(distritos_ubs.keys()),
+                                    key="filtro_dist_conf",
+                                )
+                            with col_f_ubs:
+                                ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
+                                filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
+                            with col_f_agr:
+                                if st.session_state.perfil == "GESTAO":
+                                    agrupamento = st.selectbox(
+                                        "Agrupar conferência",
+                                        ["Por pedido", "Por UBS", "Por material (rateio)"],
+                                        key="agrupamento_conf",
+                                    )
+                                else:
+                                    agrupamento = "Por pedido"
+                                    st.selectbox("Agrupar conferência", ["Por pedido"], disabled=True, key="agrupamento_conf_ubs")
 
-                            def rotulo_pedido(row):
-                                return f"{row['ubs']} | {row['data']} | {row['status']} | {row['numero_pedido']}"
+                            df_lista = pedidos_unicos.copy()
+                            if filtro_status != "Todos":
+                                df_lista = df_lista[df_lista["status"] == filtro_status]
+                            if filtro_distrito != "Todos":
+                                df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
+                            if filtro_ubs != "Todas":
+                                df_lista = df_lista[df_lista["ubs"] == filtro_ubs]
+                            df_lista = df_lista.sort_values(by="data", ascending=False)
 
-                            mapa_rotulos = {rotulo_pedido(row): row["numero_pedido"] for _, row in df_lista.iterrows()}
-                            lista_rotulos = ["Selecione..."] + list(mapa_rotulos.keys())
-                            rotulo_escolhido = st.selectbox("Escolha o pedido para conferir ou ver o comprovante:", lista_rotulos, key="pedido_rotulo_conf")
-                            pedido_selecionado = mapa_rotulos.get(rotulo_escolhido, "Selecione...")
+                            conferencia_por_material = agrupamento == "Por material (rateio)" and st.session_state.perfil == "GESTAO"
 
-                            if rotulo_escolhido == "Selecione...":
-                                st.write("**Lista de Pedidos (agrupada pelos filtros acima):**")
+                            if conferencia_por_material:
+                                st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
+                                st.caption("Quando várias UBS pedem o mesmo item com estoque baixo, o sistema sugere a divisão proporcional do saldo.")
+                                pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
+                                if filtro_distrito != "Todos":
+                                    pendentes = pendentes[pendentes["distrito"] == filtro_distrito]
+                                if filtro_ubs != "Todas":
+                                    pendentes = pendentes[pendentes["ubs"] == filtro_ubs]
+                                materiais_pendentes = sorted(pendentes["material"].dropna().astype(str).str.strip().unique().tolist()) if not pendentes.empty else []
+                                material_rateio = st.selectbox("Material para conferir", ["Selecione..."] + materiais_pendentes, key="mat_rateio_conf")
+                                if material_rateio != "Selecione..." and not pendentes.empty:
+                                    linhas_mat = pendentes[pendentes["material"].astype(str).str.strip() == material_rateio].copy()
+                                    saidas_conf = mapa_saidas_conferidas()
+                                    saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
+                                    mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
+                                    estoque_atual = estoque_visivel(
+                                        material_rateio,
+                                        mapa_planilha_conf.get(material_rateio, 0),
+                                        saidas_conf,
+                                        saldos_lote_conf,
+                                        materiais_lote_conf,
+                                    )
+                                    qtds_pedidas = [parse_numero(q, inteiro=True) for q in linhas_mat["quantidade"].tolist()]
+                                    sugestoes = sugerir_rateio(qtds_pedidas, estoque_atual)
+                                    demanda_total = sum(qtds_pedidas)
+                                    m1, m2, m3 = st.columns(3)
+                                    m1.metric("Estoque atual", f"{estoque_atual} un.")
+                                    m2.metric("Demanda pendente", f"{demanda_total} un.")
+                                    m3.metric("UBS solicitantes", linhas_mat["ubs"].nunique())
+                                    if demanda_total > estoque_atual:
+                                        st.warning("Estoque insuficiente para atender todas as unidades. As quantidades sugeridas já estão rateadas.")
+
+                                    with st.form(key=f"form_rateio_{material_rateio}"):
+                                        novas_quantidades_entregues = {}
+                                        for i, (idx, row) in enumerate(linhas_mat.iterrows()):
+                                            qtd_pedida = parse_numero(row["quantidade"], inteiro=True)
+                                            max_entregue = max(0, min(qtd_pedida, estoque_atual if demanda_total <= estoque_atual else qtd_pedida))
+                                            sugerido = min(sugestoes[i] if i < len(sugestoes) else 0, max_entregue)
+                                            c1, c2, c3, c4 = st.columns([1.3, 2.2, 1, 1])
+                                            c1.write(f"**{row['ubs']}**")
+                                            c2.write(f"{row['numero_pedido']}")
+                                            c3.write(f"Pediu: {qtd_pedida}")
+                                            val_entregue = c4.number_input(
+                                                f"Entregar ({row['ubs']})",
+                                                min_value=0,
+                                                max_value=qtd_pedida,
+                                                value=sugerido,
+                                                key=f"rateio_{row['id'] if 'id' in row else idx}",
+                                            )
+                                            novas_quantidades_entregues[row["id"] if "id" in row else idx] = val_entregue
+                                        obs_gestao = st.text_input("Observação da Gestão (Opcional)", key=f"obs_rateio_{material_rateio}")
+                                        btn_salvar_rateio = st.form_submit_button("💾 Salvar rateio e baixar estoque")
+                                        if btn_salvar_rateio:
+                                            try:
+                                                soma_entrega = sum(novas_quantidades_entregues.values())
+                                                if soma_entrega > estoque_atual:
+                                                    st.error(f"A soma entregue ({soma_entrega}) ultrapassa o estoque ({estoque_atual}). Ajuste o rateio.")
+                                                else:
+                                                    atualizacoes = []
+                                                    for row_id, nova_qtd in novas_quantidades_entregues.items():
+                                                        row_original = linhas_mat[linhas_mat["id"] == row_id].iloc[0] if "id" in linhas_mat.columns else linhas_mat.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
+                                                        atualizacoes.append((row_id, nova_qtd, row_original))
+                                                    persistir_entregas(atualizacoes, (obs_gestao or "").strip())
+                                                    st.success("Rateio salvo. Estoque baixado com o total entregue deste material.")
+                                                    st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Erro ao salvar rateio: {e}")
+
+                                st.markdown("---")
+                                st.write("**Fila de pedidos (para comprovante):**")
                                 st.dataframe(df_lista, use_container_width=True, hide_index=True)
+                                lista_opcoes = ["Selecione..."] + list(df_lista["numero_pedido"].unique())
+                                pedido_selecionado = st.selectbox("Abrir comprovante de um pedido:", lista_opcoes, key="pedido_comp_rateio")
+                            else:
+                                if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
+                                    ubs_grupo = st.selectbox(
+                                        "Escolha a UBS para ver os pedidos agrupados",
+                                        ["Selecione..."] + sorted(df_lista["ubs"].dropna().astype(str).unique().tolist()),
+                                        key="ubs_grupo_conf",
+                                    )
+                                    if ubs_grupo != "Selecione...":
+                                        df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
+
+                                def rotulo_pedido(row):
+                                    return f"{row['ubs']} | {row['data']} | {row['status']} | {row['numero_pedido']}"
+
+                                mapa_rotulos = {rotulo_pedido(row): row["numero_pedido"] for _, row in df_lista.iterrows()}
+                                lista_rotulos = ["Selecione..."] + list(mapa_rotulos.keys())
+                                rotulo_escolhido = st.selectbox("Escolha o pedido para conferir ou ver o comprovante:", lista_rotulos, key="pedido_rotulo_conf")
+                                pedido_selecionado = mapa_rotulos.get(rotulo_escolhido, "Selecione...")
+
+                                if rotulo_escolhido == "Selecione...":
+                                    st.write("**Lista de Pedidos (agrupada pelos filtros acima):**")
+                                    st.dataframe(df_lista, use_container_width=True, hide_index=True)
                         
                         if pedido_selecionado != "Selecione...":
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
