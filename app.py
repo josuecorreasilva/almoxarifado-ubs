@@ -1,17 +1,11 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import time
 import re
 import unicodedata
 from datetime import datetime, date
 from supabase import create_client, Client
-
-try:
-    from st_keyup import st_keyup
-    BUSCA_AO_DIGITAR = True
-except ImportError:
-    st_keyup = None
-    BUSCA_AO_DIGITAR = False
 
 try:
     from fpdf import FPDF
@@ -155,22 +149,36 @@ st.markdown("""
     .st-key-catalogo_marcacao [data-testid="stMarkdownContainer"],
     .st-key-catalogo_marcacao [data-testid="stWidgetLabel"],
     .st-key-catalogo_marcacao label {
-        font-size: 0.8rem !important;
-        line-height: 1.25 !important;
+        font-size: 0.82rem !important;
+        line-height: 1.3 !important;
     }
     .st-key-catalogo_marcacao [data-testid="stVerticalBlock"] {
-        gap: 0.2rem !important;
+        gap: 0.28rem !important;
+    }
+    .st-key-catalogo_marcacao [data-testid="stForm"] [data-testid="stHorizontalBlock"]:has([data-testid="stCheckbox"]) {
+        background: #f7fafb;
+        border: 1px solid #e2ecee;
+        border-radius: 8px;
+        padding: 4px 10px 2px 8px;
+        margin-bottom: 4px;
+        align-items: center;
+    }
+    .st-key-catalogo_marcacao [data-testid="stNumberInput"] {
+        max-width: 92px;
     }
     .st-key-catalogo_marcacao [data-testid="stNumberInput"] input {
-        font-size: 0.8rem !important;
-        padding-top: 0.2rem !important;
-        padding-bottom: 0.2rem !important;
+        font-size: 0.85rem !important;
+        font-weight: 600;
+        text-align: center;
+        padding-top: 0.25rem !important;
+        padding-bottom: 0.25rem !important;
     }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] {
-        min-height: 1.2rem !important;
+        min-height: 1.3rem !important;
     }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
+        font-weight: 500 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -895,6 +903,40 @@ def quantidade_sugerida_pedido(estoque):
     return 10
 
 
+def ativar_filtro_digitacao():
+    components.html(
+        """
+<script>
+(function() {
+  const doc = window.parent.document;
+  function ligar(input) {
+    if (!input || input.dataset.sispacLive === "1") return;
+    input.dataset.sispacLive = "1";
+    input.addEventListener("input", function() {
+      const el = this;
+      clearTimeout(el._sispacT);
+      el._sispacT = setTimeout(function() {
+        const pos = el.selectionStart;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.blur();
+        el.focus();
+        try { if (pos != null) el.setSelectionRange(pos, pos); } catch (err) {}
+      }, 140);
+    });
+  }
+  function procurar() {
+    doc.querySelectorAll('input[aria-label="Filtrar pelo nome do material"], .st-key-filtro_nome_catalogo input').forEach(ligar);
+  }
+  procurar();
+  new MutationObserver(procurar).observe(doc.body, { childList: true, subtree: true });
+})();
+</script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def incluir_item_carrinho(distrito, ubs, categoria, material, quantidade, valor_unitario):
     quantidade = max(1, parse_numero(quantidade, inteiro=True))
     valor_unitario = parse_numero(valor_unitario)
@@ -1342,11 +1384,13 @@ with aba1:
 
         with st.container(key="catalogo_marcacao"):
             st.markdown("##### Catálogo da categoria")
-            st.caption("Clique na caixa ou no nome do material para marcar. Informe a quantidade ao lado. O estoque é conferido na gestão, no despacho.")
-            if BUSCA_AO_DIGITAR:
-                filtro_nome = st_keyup("Filtrar pelo nome do material", key="filtro_nome_catalogo", debounce=150)
-            else:
-                filtro_nome = st.text_input("Filtrar pelo nome do material", key="filtro_nome_catalogo")
+            st.caption("Clique no nome para marcar. A quantidade fica ao lado do item. A lista filtra enquanto você digita.")
+            filtro_nome = st.text_input(
+                "Filtrar pelo nome do material",
+                key="filtro_nome_catalogo",
+                placeholder="Comece a digitar o nome do item",
+            )
+            ativar_filtro_digitacao()
             filtro_nome = str(filtro_nome or "")
             if filtro_nome.strip():
                 df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
@@ -1354,20 +1398,22 @@ with aba1:
             if df_filtrado.empty:
                 st.info("Nenhum material nesta categoria com o filtro atual.")
             else:
-                cab1, cab2 = st.columns([5.2, 1.1])
-                cab1.markdown("**Material**")
-                cab2.markdown("**Qtd**")
+                cab_item, cab_qtd, cab_espaco = st.columns([4.4, 0.9, 3.2])
+                cab_item.markdown("**Item**")
+                cab_qtd.markdown("**Qtd**")
+                cab_espaco.write("")
                 with st.form("form_catalogo_itens"):
                     escolhas = []
                     for i, (_, item_row) in enumerate(df_filtrado.iterrows()):
                         material_cat = str(item_row[col_material]).strip()
                         valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
-                        c_chk, c_qtd = st.columns([5.2, 1.1])
+                        c_chk, c_qtd, _ = st.columns([4.4, 0.9, 3.2])
                         marcado = c_chk.checkbox(material_cat, key=f"cat_chk_{i}")
                         qtd_item = c_qtd.number_input(
                             "Qtd",
                             min_value=1,
                             value=1,
+                            step=1,
                             key=f"cat_qtd_{i}",
                             label_visibility="collapsed",
                         )
@@ -1395,24 +1441,36 @@ with aba1:
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
         st.markdown("##### Itens da requisição")
-        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.55])
-        col_cab1.write("**UBS**")
-        col_cab2.write("**Categoria**")
-        col_cab3.write("**Material**")
-        col_cab4.write("**Qtd**")
-        col_cab5.write("")
-        st.divider()
-        
-        for i, item in enumerate(st.session_state.carrinho):
-            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.55])
-            c1.write(item["ubs"])
-            c2.write(item["categoria"])
-            c3.write(item["material"])
-            c4.write(item["quantidade"])
-            
-            if c5.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
-                st.session_state.carrinho.pop(i)
-                st.rerun()
+        if st.session_state.perfil == "UBS":
+            col_cab1, col_cab2, col_cab3 = st.columns([5.2, 1, 0.6])
+            col_cab1.write("**Item**")
+            col_cab2.write("**Qtd**")
+            col_cab3.write("")
+            st.divider()
+            for i, item in enumerate(st.session_state.carrinho):
+                c1, c2, c3 = st.columns([5.2, 1, 0.6])
+                c1.write(item["material"])
+                c2.write(str(item["quantidade"]))
+                if c3.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
+                    st.session_state.carrinho.pop(i)
+                    st.rerun()
+        else:
+            col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.55])
+            col_cab1.write("**UBS**")
+            col_cab2.write("**Categoria**")
+            col_cab3.write("**Material**")
+            col_cab4.write("**Qtd**")
+            col_cab5.write("")
+            st.divider()
+            for i, item in enumerate(st.session_state.carrinho):
+                c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.55])
+                c1.write(item["ubs"])
+                c2.write(item["categoria"])
+                c3.write(item["material"])
+                c4.write(item["quantidade"])
+                if c5.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
+                    st.session_state.carrinho.pop(i)
+                    st.rerun()
 
     observacao_geral = st.text_area(
         "Observações (opcional)", 
