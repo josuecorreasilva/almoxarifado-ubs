@@ -229,6 +229,31 @@ def parse_numero(valor, inteiro=False):
         return padrao
 
 
+def filtrar_pedidos_por_numero(df, termo):
+    if df is None or df.empty or not str(termo or "").strip():
+        return df
+    termo = str(termo).strip()
+    nums = df["numero_pedido"].astype(str)
+    return df[nums.str.contains(re.escape(termo), case=False, regex=True, na=False)]
+
+
+def render_lista_pedidos_clicavel(df_lista, chave):
+    if df_lista is None or df_lista.empty:
+        st.info("Nenhum pedido encontrado.")
+        return
+    df_lista = df_lista.reset_index(drop=True)
+    st.caption("Clique no pedido para abrir.")
+    for i, row in df_lista.iterrows():
+        numero = str(row["numero_pedido"])
+        rotulo = (
+            f"{numero}  ·  {row.get('ubs', '')}  ·  {row.get('data', '')}  ·  "
+            f"{row.get('status', '')}  ·  {int(row.get('itens') or 0)} item(ns)"
+        )
+        if st.button(rotulo, key=f"{chave}_{i}_{numero}", use_container_width=True):
+            st.session_state.pedido_aberto = numero
+            st.rerun()
+
+
 def status_consolidado_pedido(df_itens):
     if df_itens is None or df_itens.empty or "status" not in df_itens.columns:
         return "Pedido enviado"
@@ -1185,7 +1210,7 @@ with col_titulo:
 if st.session_state.perfil == "GESTAO":
     aba1, aba2, aba3 = st.tabs(["Novo pedido", "Painel gerencial", "Cadastro e estoque"])
 else:
-    aba1, aba2 = st.tabs(["Novo pedido", "Painel gerencial"])
+    aba1, aba2 = st.tabs(["Novo pedido", "Acompanhar pedidos"])
     aba3 = None
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
@@ -1407,11 +1432,18 @@ with aba1:
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
-    st.markdown(
-        "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-        "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.</p></div>",
-        unsafe_allow_html=True,
-    )
+    if st.session_state.perfil == "GESTAO":
+        st.markdown(
+            "<div class='nao-imprimir'><h4>Painel de controle</h4>"
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.</p></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<div class='nao-imprimir'><h4>Acompanhar pedidos</h4>"
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Consulte os pedidos da unidade. Clique em um item da lista para abrir.</p></div>",
+            unsafe_allow_html=True,
+        )
     
     if not supabase:
         st.error("Banco de dados desconectado.")
@@ -1446,23 +1478,22 @@ with aba2:
                 if df_supabase.empty:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
-                    # Opções de visualização adaptadas ao perfil
-                    opcoes_visao = [
-                        "📥 Fila de Chegada (ordem de entrada)",
-                        "📋 Acompanhar Pedidos, Conferência e Comprovantes", 
-                        "📈 Relatórios Analíticos e Gráficos", 
-                        "🖨️ Emitir Relatório Oficial (Imprimir)"
-                    ]
-                    
                     if st.session_state.perfil == "GESTAO":
-                        opcoes_visao.insert(1, "💰 Centro de Custos e Orçamento (Efetivo)")
-
-                    modo_aba2 = st.radio(
-                        "Escolha a visualização:", 
-                        opcoes_visao,
-                        horizontal=True,
-                        key="radio_modo_aba2"
-                    )
+                        opcoes_visao = [
+                            "📥 Fila de Chegada (ordem de entrada)",
+                            "📋 Acompanhar Pedidos, Conferência e Comprovantes",
+                            "💰 Centro de Custos e Orçamento (Efetivo)",
+                            "📈 Relatórios Analíticos e Gráficos",
+                            "🖨️ Emitir Relatório Oficial (Imprimir)",
+                        ]
+                        modo_aba2 = st.radio(
+                            "Escolha a visualização:",
+                            opcoes_visao,
+                            horizontal=True,
+                            key="radio_modo_aba2",
+                        )
+                    else:
+                        modo_aba2 = "📋 Acompanhar Pedidos, Conferência e Comprovantes"
                     
                     st.markdown("---")
                     
@@ -1482,7 +1513,6 @@ with aba2:
                         pedidos_unicos["itens"] = pedidos_unicos["numero_pedido"].map(lambda n: int(qtd_itens_pedido.get(n, 0)))
                         pedidos_unicos = pedidos_unicos[["numero_pedido", "data", "distrito", "ubs", "status", "itens"]]
 
-                        pedido_selecionado = "Selecione..."
                         conferencia_por_material = False
 
                         if modo_aba2 == "📥 Fila de Chegada (ordem de entrada)":
@@ -1517,45 +1547,46 @@ with aba2:
                             if df_fila_exibir.empty:
                                 st.info("Não há pedidos nesta fila no momento.")
                             else:
-                                st.dataframe(df_fila_exibir, use_container_width=True, hide_index=True)
-
-                                mapa_fila = {
-                                    f"#{int(row['Ordem de chegada']):02d} | {row['UBS']} | {row['Identificação do pedido']} | {row['Data/hora']} | {row['Status']}": row["Identificação do pedido"]
-                                    for _, row in df_fila_exibir.iterrows()
-                                }
-                                rotulo_fila = st.selectbox(
-                                    "Abrir pedido da fila (do primeiro que chegou ao último):",
-                                    ["Selecione..."] + list(mapa_fila.keys()),
-                                    key="select_fila_chegada",
-                                )
-                                pedido_selecionado = mapa_fila.get(rotulo_fila, "Selecione...")
+                                busca_fila = st.text_input("Buscar número do pedido", key="busca_num_pedido_fila")
+                                df_fila_click = filtrar_pedidos_por_numero(df_fila, busca_fila)
+                                render_lista_pedidos_clicavel(df_fila_click, "fila")
+                                if busca_fila.strip() and (df_fila_click is None or df_fila_click.empty):
+                                    st.warning("Nenhum pedido com esse número.")
+                                elif busca_fila.strip() and len(df_fila_click) == 1:
+                                    st.session_state.pedido_aberto = str(df_fila_click.iloc[0]["numero_pedido"])
                         else:
-                            col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
-                            with col_f_st:
-                                filtro_status = st.selectbox(
-                                    "Status",
-                                    ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
-                                    key="filtro_status_conf",
-                                )
-                            with col_f_dist:
-                                filtro_distrito = st.selectbox(
-                                    "Distrito",
-                                    ["Todos"] + list(distritos_ubs.keys()),
-                                    key="filtro_dist_conf",
-                                )
-                            with col_f_ubs:
-                                ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
-                                filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
-                            with col_f_agr:
-                                if st.session_state.perfil == "GESTAO":
+                            if st.session_state.perfil == "GESTAO":
+                                col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
+                                with col_f_st:
+                                    filtro_status = st.selectbox(
+                                        "Status",
+                                        ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                        key="filtro_status_conf",
+                                    )
+                                with col_f_dist:
+                                    filtro_distrito = st.selectbox(
+                                        "Distrito",
+                                        ["Todos"] + list(distritos_ubs.keys()),
+                                        key="filtro_dist_conf",
+                                    )
+                                with col_f_ubs:
+                                    ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
+                                    filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
+                                with col_f_agr:
                                     agrupamento = st.selectbox(
                                         "Agrupar conferência",
                                         ["Por pedido", "Por UBS", "Por material (rateio)"],
                                         key="agrupamento_conf",
                                     )
-                                else:
-                                    agrupamento = "Por pedido"
-                                    st.selectbox("Agrupar conferência", ["Por pedido"], disabled=True, key="agrupamento_conf_ubs")
+                            else:
+                                filtro_status = st.selectbox(
+                                    "Status",
+                                    ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                    key="filtro_status_conf",
+                                )
+                                filtro_distrito = "Todos"
+                                filtro_ubs = "Todas"
+                                agrupamento = "Por pedido"
 
                             df_lista = pedidos_unicos.copy()
                             if filtro_status != "Todos":
@@ -1638,9 +1669,13 @@ with aba2:
 
                                 st.markdown("---")
                                 st.write("**Fila de pedidos (para comprovante):**")
-                                st.dataframe(df_lista, use_container_width=True, hide_index=True)
-                                lista_opcoes = ["Selecione..."] + list(df_lista["numero_pedido"].unique())
-                                pedido_selecionado = st.selectbox("Abrir comprovante de um pedido:", lista_opcoes, key="pedido_comp_rateio")
+                                busca_rateio = st.text_input("Buscar número do pedido", key="busca_num_pedido_rateio")
+                                df_lista_rateio = filtrar_pedidos_por_numero(df_lista, busca_rateio)
+                                render_lista_pedidos_clicavel(df_lista_rateio, "rateio")
+                                if busca_rateio.strip() and (df_lista_rateio is None or df_lista_rateio.empty):
+                                    st.warning("Nenhum pedido com esse número.")
+                                elif busca_rateio.strip() and len(df_lista_rateio) == 1:
+                                    st.session_state.pedido_aberto = str(df_lista_rateio.iloc[0]["numero_pedido"])
                             else:
                                 if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
                                     ubs_grupo = st.selectbox(
@@ -1651,19 +1686,23 @@ with aba2:
                                     if ubs_grupo != "Selecione...":
                                         df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
 
-                                def rotulo_pedido(row):
-                                    return f"{row['ubs']} | {row['data']} | {row['status']} | {row['numero_pedido']}"
+                                busca_pedido = st.text_input("Buscar número do pedido", placeholder="Ex.: PED-0012", key="busca_num_pedido_acomp")
+                                df_lista = filtrar_pedidos_por_numero(df_lista, busca_pedido)
+                                if busca_pedido.strip() and (df_lista is None or df_lista.empty):
+                                    st.warning("Nenhum pedido com esse número.")
+                                else:
+                                    if busca_pedido.strip() and len(df_lista) == 1:
+                                        st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
+                                    render_lista_pedidos_clicavel(df_lista, "acomp")
 
-                                mapa_rotulos = {rotulo_pedido(row): row["numero_pedido"] for _, row in df_lista.iterrows()}
-                                lista_rotulos = ["Selecione..."] + list(mapa_rotulos.keys())
-                                rotulo_escolhido = st.selectbox("Escolha o pedido para conferir ou ver o comprovante:", lista_rotulos, key="pedido_rotulo_conf")
-                                pedido_selecionado = mapa_rotulos.get(rotulo_escolhido, "Selecione...")
-
-                                if rotulo_escolhido == "Selecione...":
-                                    st.write("**Lista de Pedidos (agrupada pelos filtros acima):**")
-                                    st.dataframe(df_lista, use_container_width=True, hide_index=True)
+                        pedido_selecionado = st.session_state.get("pedido_aberto") or "Selecione..."
+                        if pedido_selecionado not in set(pedidos_unicos["numero_pedido"].astype(str)):
+                            pedido_selecionado = "Selecione..."
                         
                         if pedido_selecionado != "Selecione...":
+                            if st.button("← Voltar à lista", key="btn_voltar_pedido"):
+                                st.session_state.pedido_aberto = None
+                                st.rerun()
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = status_consolidado_pedido(detalhes)
 
