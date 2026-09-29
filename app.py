@@ -24,39 +24,60 @@ st.set_page_config(page_title="SisPAC — SMS Pelotas", page_icon="🏥", layout
 st.markdown("""
     <style>
     @media print {
-        @page { size: A4; margin: 12mm; }
-        html, body, .stApp, [data-testid="stAppViewContainer"],
-        [data-testid="stMain"], .main, .block-container {
+        @page { size: A4; margin: 10mm; }
+        html, body {
+            background: white !important;
+            height: auto !important;
+            margin: 0 !important;
+        }
+        [data-testid="stSidebar"],
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-baseweb="tab-list"],
+        [role="tablist"],
+        header,
+        .sispac-header,
+        .nao-imprimir,
+        [data-testid="stImage"],
+        [data-testid="stForm"],
+        [data-testid="stRadio"],
+        [data-testid="stSelectbox"],
+        [data-testid="stButton"],
+        [data-testid="stDownloadButton"],
+        [data-testid="stCheckbox"],
+        [data-testid="stTextInput"],
+        [data-testid="stNumberInput"],
+        [data-testid="stCaption"] {
+            display: none !important;
+        }
+        *:has(.area-impressao) {
+            display: block !important;
+            visibility: visible !important;
             height: auto !important;
             overflow: visible !important;
+            position: static !important;
             padding: 0 !important;
             margin: 0 !important;
         }
-        body * { display: none !important; }
-        .area-impressao,
-        .area-impressao * {
-            display: revert !important;
+        *:has(.area-impressao) > *:not(:has(.area-impressao)):not(.area-impressao) {
+            display: none !important;
+        }
+        .area-impressao, .area-impressao * {
             visibility: visible !important;
+            color: #000 !important;
         }
         .area-impressao {
             display: block !important;
-            position: static !important;
-            inset: auto !important;
             width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: 0 !important;
-            box-shadow: none !important;
             background: white !important;
-            page-break-before: avoid !important;
         }
         .area-impressao table { display: table !important; width: 100% !important; }
         .area-impressao thead { display: table-header-group !important; }
         .area-impressao tbody { display: table-row-group !important; }
         .area-impressao tr { display: table-row !important; }
         .area-impressao th, .area-impressao td { display: table-cell !important; }
-        .area-impressao h3, .area-impressao h4, .area-impressao p { display: block !important; }
+        .bloco-assinaturas { display: flex !important; }
+        .campo-assinatura, .campo-assinatura .linha { display: block !important; }
     }
     .area-impressao table {
         width: 100%;
@@ -940,8 +961,9 @@ if not st.session_state.autenticado:
 # ==========================================
 # 4. BARRA LATERAL (MENU DE USUÁRIO)
 # ==========================================
-st.sidebar.markdown("**SisPAC**")
-st.sidebar.caption("Almoxarifado Central · SMS Pelotas")
+st.sidebar.markdown("### SisPAC")
+st.sidebar.caption("Pedidos, conferência e relatórios")
+st.sidebar.caption("Almoxarifado Central — SMS Pelotas")
 st.sidebar.divider()
 st.sidebar.write(f"Usuário: **{st.session_state.email_usuario}**")
 perfil_legenda = "Gestão / Almoxarifado" if st.session_state.perfil == "GESTAO" else f"UBS {st.session_state.ubs_nome}"
