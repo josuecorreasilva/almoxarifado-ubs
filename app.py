@@ -494,7 +494,8 @@ def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
     return pdf_para_bytes(pdf)
 
 
-def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
+def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer, extra_cabecalho=None, destacar_ultima=False):
+    extra_cabecalho = extra_cabecalho or []
     if not FPDF_DISPONIVEL:
         parecer_limpo = re.sub(r"<[^>]+>", "", str(parecer))
         linhas = [
@@ -504,9 +505,9 @@ def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
             f"Distrito / Unidade: {distrito} / {ubs}",
             f"Periodo abrangido: {periodo}",
             f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            "",
         ]
-        linhas.append(" | ".join(str(c) for c in df_print.columns))
+        linhas.extend(str(item) for item in extra_cabecalho)
+        linhas += ["", " | ".join(str(c) for c in df_print.columns)]
         for _, linha in df_print.iterrows():
             linhas.append(" | ".join(str(linha[c]) for c in df_print.columns))
         linhas += ["", "Parecer tecnico:", parecer_limpo, "", "Gestao do Almoxarifado - Assinatura e carimbo"]
@@ -523,6 +524,11 @@ def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
     pdf.cell(0, 6, texto_pdf(f"Distrito / Unidade: {distrito} / {ubs}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(0, 6, texto_pdf(f"Periodo abrangido: {periodo}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(0, 6, texto_pdf(f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if extra_cabecalho:
+        pdf.set_font("Helvetica", "B", 10)
+        for item in extra_cabecalho:
+            pdf.cell(0, 6, texto_pdf(item), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 10)
     pdf.ln(3)
     colunas = [str(c) for c in df_print.columns]
     n = max(len(colunas), 1)
@@ -540,11 +546,13 @@ def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
     for titulo_col, largura in zip(colunas, larguras):
         pdf_celula(pdf, largura, 7, titulo_col, negrito=True, alinhar="C")
     pdf.ln()
-    for _, linha in df_print.iterrows():
+    ultima = len(df_print) - 1
+    for i, (_, linha) in enumerate(df_print.iterrows()):
         if pdf.get_y() > 265:
             pdf.add_page()
+        negrito = destacar_ultima and i == ultima
         for coluna, largura in zip(colunas, larguras):
-            pdf_celula(pdf, largura, 6, linha[coluna])
+            pdf_celula(pdf, largura, 6, linha[coluna], negrito=negrito)
         pdf.ln()
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 10)
@@ -569,13 +577,36 @@ def html_seguro(texto):
     )
 
 
-def dataframe_para_html(df):
+def dataframe_para_html(df, destacar_ultima=False):
     cabecalho = "".join(f"<th>{html_seguro(col)}</th>" for col in df.columns)
     linhas = []
-    for _, linha in df.iterrows():
+    total_linhas = len(df)
+    for i, (_, linha) in enumerate(df.iterrows()):
         celulas = "".join(f"<td>{html_seguro(valor)}</td>" for valor in linha.tolist())
-        linhas.append(f"<tr>{celulas}</tr>")
+        estilo = ' style="font-weight:700;background:#eef3f4;"' if destacar_ultima and i == total_linhas - 1 else ""
+        linhas.append(f"<tr{estilo}>{celulas}</tr>")
     return f"<table><thead><tr>{cabecalho}</tr></thead><tbody>{''.join(linhas)}</tbody></table>"
+
+
+def adicionar_linha_total_relatorio(df, qtd_solicitada, qtd_entregue, custo_str=None):
+    linha = {col: "" for col in df.columns}
+    colunas = list(df.columns)
+    if "Categoria" in linha:
+        linha["Categoria"] = "TOTAL"
+    elif colunas:
+        linha[colunas[0]] = "TOTAL"
+    if "Material" in linha and "Categoria" in linha:
+        linha["Material"] = ""
+    elif "Material" in linha:
+        linha["Material"] = "TOTAL"
+    if "Qtd Solicitada" in linha:
+        linha["Qtd Solicitada"] = int(qtd_solicitada)
+    if "Qtd Entregue" in linha:
+        linha["Qtd Entregue"] = int(qtd_entregue)
+    for col in colunas:
+        if "Custo" in str(col) and custo_str:
+            linha[col] = custo_str
+    return pd.concat([df, pd.DataFrame([linha])], ignore_index=True)
 
 
 def html_bloco_assinaturas(esquerda_titulo, esquerda_legenda, direita_titulo, direita_legenda):
@@ -1918,8 +1949,23 @@ with aba2:
                             custo_global_str = formatar_moeda_br(custo_global_periodo)
                             total_geral_pedidas = df_rel_final["Qtd Solicitada"].sum()
                             total_geral_entregues = df_rel_final["Qtd Entregue"].sum()
+                            df_print = adicionar_linha_total_relatorio(
+                                df_print,
+                                total_geral_pedidas,
+                                total_geral_entregues,
+                                None if sem_custo_oficial else custo_global_str,
+                            )
                             escopo_texto = f"categoria <b>{html_seguro(cat_escolhida_imp)}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
                             via_txt = " (via operacional — sem valores)" if sem_custo_oficial else " (via gerencial — com custos)"
+                            extra_cabecalho = [
+                                f"Totais: {int(total_geral_pedidas)} un. solicitadas | {int(total_geral_entregues)} un. entregues"
+                            ]
+                            if not sem_custo_oficial:
+                                extra_cabecalho.insert(0, f"Custo efetivo total: {custo_global_str}")
+                            cabecalho_html_totais = "".join(
+                                f"<p><b>{html_seguro(item.split(':', 1)[0])}:</b>{html_seguro(item.split(':', 1)[1])}</p>"
+                                for item in extra_cabecalho
+                            )
 
                             if st.session_state.perfil == "GESTAO" and not sem_custo_oficial:
                                 parecer_tecnico = (
@@ -1942,7 +1988,7 @@ with aba2:
                                 extensao="pdf",
                             )
                             nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
-                            tabela_html = dataframe_para_html(df_print)
+                            tabela_html = dataframe_para_html(df_print, destacar_ultima=True)
                             html_relatorio = f"""
                             <div class="area-impressao" style="padding: 8px; background-color: #ffffff;">
                                 <h3 style="text-align: center; margin: 0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
@@ -1950,6 +1996,7 @@ with aba2:
                                 <p><b>Distrito / Unidade:</b> {html_seguro(dist_imp_esc)} / {html_seguro(ubs_imp)}</p>
                                 <p><b>Período abrangido:</b> {html_seguro(periodo_imp)}</p>
                                 <p><b>Data de emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                                {cabecalho_html_totais}
                                 <p><b>1. Relação consolidada (demanda vs despacho):</b></p>
                                 {tabela_html}
                                 <p style="margin-top:16px;"><b>2. Parecer técnico / administrativo preliminar:</b></p>
@@ -1971,6 +2018,8 @@ with aba2:
                                 ubs_imp,
                                 periodo_imp,
                                 parecer_tecnico,
+                                extra_cabecalho=extra_cabecalho,
+                                destacar_ultima=True,
                             )
                             c_dl_rel, c_imp_rel = st.columns(2)
                             with c_dl_rel:
