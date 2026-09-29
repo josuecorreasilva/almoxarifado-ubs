@@ -933,10 +933,12 @@ if not st.session_state.autenticado:
     with col_l2:
         st.markdown("#### Acesso institucional")
         st.caption("Informe as credenciais da unidade ou da gestão do almoxarifado.")
-        email_digitado = st.text_input("E-mail institucional").lower().strip()
-        senha_digitada = st.text_input("Senha", type="password")
-        
-        if st.button("Entrar", type="primary", use_container_width=True):
+        with st.form("form_login"):
+            email_digitado = st.text_input("E-mail institucional").lower().strip()
+            senha_digitada = st.text_input("Senha", type="password")
+            entrar = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+
+        if entrar:
             try:
                 resposta = supabase.auth.sign_in_with_password({
                     "email": email_digitado,
@@ -1145,7 +1147,7 @@ with aba1:
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
         st.markdown("##### Itens da requisição")
-        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.5])
+        col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.55])
         col_cab1.write("**UBS**")
         col_cab2.write("**Categoria**")
         col_cab3.write("**Material**")
@@ -1154,13 +1156,13 @@ with aba1:
         st.divider()
         
         for i, item in enumerate(st.session_state.carrinho):
-            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.5])
+            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.55])
             c1.write(item["ubs"])
             c2.write(item["categoria"])
             c3.write(item["material"])
             c4.write(item["quantidade"])
             
-            if c5.button("Remover", key=f"excluir_{i}_{item['material']}"):
+            if c5.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
