@@ -3,7 +3,7 @@ import pandas as pd
 import time
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, date
 from supabase import create_client, Client
 
 try:
@@ -868,7 +868,124 @@ def sugerir_rateio(quantidades_pedidas, estoque):
     return rateio
 
 
+def _rpc_ausente(erro):
+    texto = str(erro).lower()
+    return any(trecho in texto for trecho in (
+        "could not find the function",
+        "pgrst202",
+        "schema cache",
+        "does not exist",
+    ))
+
+
+def registrar_auditoria(acao, entidade="", detalhe=""):
+    try:
+        supabase.table("sispac_auditoria").insert({
+            "usuario": st.session_state.get("email_usuario"),
+            "acao": acao,
+            "entidade": entidade,
+            "detalhe": str(detalhe)[:500],
+        }).execute()
+    except Exception:
+        pass
+
+
+def carregar_materiais_banco():
+    try:
+        resposta = supabase.table("materiais").select("*").execute()
+        return pd.DataFrame(resposta.data or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def mesclar_materiais_banco(df_planilha, col_categoria, col_material, col_estoque, col_preco):
+    df_banco = carregar_materiais_banco()
+    if df_banco.empty:
+        return df_planilha
+    df_banco.columns = [str(c).strip().lower() for c in df_banco.columns]
+    if "material" not in df_banco.columns:
+        return df_planilha
+    if df_planilha is None or df_planilha.empty:
+        col_categoria = col_categoria or "Categoria"
+        col_material = col_material or "Material"
+        col_preco = col_preco or "Valor Unitário"
+        col_estoque = col_estoque or "Estoque"
+        linhas = []
+        for _, row in df_banco.iterrows():
+            linhas.append({
+                col_categoria: str(row.get("categoria") or "Cadastro SisPAC").strip(),
+                col_material: str(row.get("material") or "").strip(),
+                col_preco: parse_numero(row.get("valor_unitario")),
+                col_estoque: 0,
+            })
+        return pd.DataFrame(linhas)
+    nomes = set(df_planilha[col_material].astype(str).str.strip()) if col_material else set()
+    novas = []
+    for _, row in df_banco.iterrows():
+        nome = str(row.get("material") or "").strip()
+        if not nome:
+            continue
+        preco = parse_numero(row.get("valor_unitario"))
+        cat = str(row.get("categoria") or "Cadastro SisPAC").strip()
+        if nome in nomes:
+            if col_preco:
+                mask = df_planilha[col_material].astype(str).str.strip() == nome
+                df_planilha.loc[mask, col_preco] = preco
+        else:
+            nova = {c: None for c in df_planilha.columns}
+            if col_categoria:
+                nova[col_categoria] = cat
+            if col_material:
+                nova[col_material] = nome
+            if col_preco:
+                nova[col_preco] = preco
+            if col_estoque:
+                nova[col_estoque] = 0
+            novas.append(nova)
+            nomes.add(nome)
+    if novas:
+        df_planilha = pd.concat([df_planilha, pd.DataFrame(novas)], ignore_index=True)
+    return df_planilha
+
+
 def persistir_entregas(atualizacoes, obs_g=""):
+    if not atualizacoes:
+        return
+    usuario = st.session_state.get("email_usuario")
+    itens = []
+    for row_id, nova_qtd, row_original in atualizacoes:
+        itens.append({
+            "id": int(row_id),
+            "quantidade_entregue": int(nova_qtd),
+            "quantidade_anterior": parse_numero(row_original.get("quantidade_entregue"), inteiro=True),
+            "material": str(row_original.get("material") or "").strip(),
+            "numero_pedido": str(row_original.get("numero_pedido") or ""),
+            "valor_unitario": float(row_original.get("valor_unitario") or 0),
+        })
+    try:
+        supabase.rpc("sispac_confirmar_itens", {
+            "p_itens": itens,
+            "p_usuario": usuario,
+            "p_obs": obs_g or "",
+        }).execute()
+    except Exception as erro:
+        if "SISPAC_CONFLITO" in str(erro):
+            raise RuntimeError(
+                "Outra pessoa já conferiu um destes itens. Atualize a página e salve de novo."
+            ) from erro
+        if not _rpc_ausente(erro):
+            raise
+        persistir_entregas_legado(atualizacoes, obs_g, usuario)
+    else:
+        atualizar_status_pedidos([str(item["numero_pedido"]) for item in itens])
+        registrar_auditoria(
+            "CONFERENCIA",
+            "pedidos",
+            f"{len(itens)} item(ns); {', '.join({item['numero_pedido'] for item in itens if item['numero_pedido']})}",
+        )
+
+
+def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None):
     numeros_afetados = []
     for row_id, nova_qtd, row_original in atualizacoes:
         qtd_ja_entregue = parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
@@ -881,8 +998,21 @@ def persistir_entregas(atualizacoes, obs_g=""):
         if obs_g:
             obs_ubs = str(row_original.get("observacao") or "").split(" | Gestão:")[0].strip()
             dados_update["observacao"] = f"{obs_ubs} | Gestão: {obs_g}" if obs_ubs else f"Gestão: {obs_g}"
-        supabase.table("pedidos").update(dados_update).eq("id", row_id).execute()
-        aplicar_baixa_estoque_central(str(row_original.get("material") or "").strip(), delta_estoque)
+        consulta = supabase.table("pedidos").update(dados_update).eq("id", row_id)
+        if qtd_ja_entregue:
+            consulta = consulta.eq("quantidade_entregue", qtd_ja_entregue)
+        resposta = consulta.execute()
+        if resposta.data is not None and len(resposta.data) == 0:
+            raise RuntimeError(
+                "Outra pessoa já conferiu um destes itens. Atualize a página e salve de novo."
+            )
+        aplicar_baixa_estoque_central(
+            str(row_original.get("material") or "").strip(),
+            delta_estoque,
+            usuario=usuario,
+            numero_pedido=str(row_original.get("numero_pedido") or ""),
+            observacao=obs_g,
+        )
         numeros_afetados.append(str(row_original.get("numero_pedido") or ""))
     atualizar_status_pedidos(numeros_afetados)
 
@@ -912,12 +1042,24 @@ def atualizar_status_pedidos(numeros):
             supabase.table("pedidos").update({"status": status}).eq("id", linha["id"]).execute()
 
 
-def aplicar_baixa_estoque_central(material, delta):
+def aplicar_baixa_estoque_central(material, delta, usuario=None, numero_pedido=None, observacao=None):
     delta = int(delta or 0)
-    if delta == 0:
+    if delta == 0 or not material:
         return
     try:
-        resposta = supabase.table("estoque_central").select("id,quantidade_atual,validade").eq("material", material).execute()
+        supabase.rpc("sispac_movimentar_estoque", {
+            "p_material": material,
+            "p_quantidade": delta,
+            "p_usuario": usuario,
+            "p_numero_pedido": numero_pedido,
+            "p_observacao": observacao,
+        }).execute()
+        return
+    except Exception as erro:
+        if not _rpc_ausente(erro):
+            return
+    try:
+        resposta = supabase.table("estoque_central").select("id,quantidade_atual,validade,lote").eq("material", material).execute()
         lotes = resposta.data or []
         if not lotes:
             return
@@ -931,9 +1073,10 @@ def aplicar_baixa_estoque_central(material, delta):
                 if atual <= 0:
                     continue
                 retirar = min(atual, restante)
+                novo_saldo = atual - retirar
                 supabase.table("estoque_central").update({
-                    "quantidade_atual": atual - retirar
-                }).eq("id", lote["id"]).execute()
+                    "quantidade_atual": novo_saldo
+                }).eq("id", lote["id"]).eq("quantidade_atual", atual).execute()
                 restante -= retirar
         else:
             devolver = abs(delta)
@@ -941,7 +1084,7 @@ def aplicar_baixa_estoque_central(material, delta):
             atual = parse_numero(lote.get("quantidade_atual"), inteiro=True)
             supabase.table("estoque_central").update({
                 "quantidade_atual": atual + devolver
-            }).eq("id", lote["id"]).execute()
+            }).eq("id", lote["id"]).eq("quantidade_atual", atual).execute()
     except Exception:
         pass
 
@@ -1039,7 +1182,11 @@ with col_titulo:
         unsafe_allow_html=True,
     )
 
-aba1, aba2 = st.tabs(["Novo pedido", "Painel gerencial"])
+if st.session_state.perfil == "GESTAO":
+    aba1, aba2, aba3 = st.tabs(["Novo pedido", "Painel gerencial", "Cadastro e estoque"])
+else:
+    aba1, aba2 = st.tabs(["Novo pedido", "Painel gerencial"])
+    aba3 = None
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
 with aba1:
@@ -1079,12 +1226,21 @@ with aba1:
         col_material = achar_coluna(df_materiais, ["Material"])
         col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
         col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
-        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria else ["Erro"]
+        df_materiais = mesclar_materiais_banco(df_materiais, col_categoria, col_material, col_estoque, col_preco)
+        if (df_materiais is None or df_materiais.empty) is False and not col_categoria:
+            col_categoria = achar_coluna(df_materiais, ["Categoria"])
+            col_material = achar_coluna(df_materiais, ["Material"])
+            col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
+            col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
+        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
     except Exception as e:
         st.error(f"Erro ao carregar materiais. Verifique o link do Google Sheets. ({e})")
-        lista_categorias = ["Erro"]
-        df_materiais = pd.DataFrame()
-        col_categoria = col_material = col_estoque = col_preco = None
+        df_materiais = mesclar_materiais_banco(pd.DataFrame(), "Categoria", "Material", "Estoque", "Valor Unitário")
+        col_categoria = achar_coluna(df_materiais, ["Categoria"]) if not df_materiais.empty else "Categoria"
+        col_material = achar_coluna(df_materiais, ["Material"]) if not df_materiais.empty else "Material"
+        col_estoque = achar_coluna(df_materiais, ["Estoque"]) if not df_materiais.empty else "Estoque"
+        col_preco = achar_coluna(df_materiais, ["Valor Unitário"]) if not df_materiais.empty else "Valor Unitário"
+        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
 
     saidas_conferidas = mapa_saidas_conferidas()
     saldos_lote, materiais_com_lote = mapa_estoque_lotes()
@@ -2035,3 +2191,127 @@ with aba2:
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
+
+if aba3 is not None:
+    with aba3:
+        st.markdown("#### Cadastro, lotes e histórico")
+        st.caption("Itens do banco somam-se à planilha. Entrada de lote baixa FIFO na conferência, com trava se duas pessoas salvarem ao mesmo tempo.")
+        usuario_atual = st.session_state.get("email_usuario")
+
+        col_cat, col_est = st.columns(2)
+        with col_cat:
+            st.markdown("##### Novo material")
+            with st.form("form_cadastro_material"):
+                cat_novo = st.text_input("Categoria")
+                mat_novo = st.text_input("Nome do material")
+                preco_novo = st.number_input("Valor unitário (R$)", min_value=0.0, value=0.0, format="%.2f")
+                if st.form_submit_button("Cadastrar material"):
+                    if not cat_novo.strip() or not mat_novo.strip():
+                        st.error("Informe categoria e material.")
+                    else:
+                        try:
+                            supabase.table("materiais").insert({
+                                "categoria": cat_novo.strip(),
+                                "material": mat_novo.strip(),
+                                "valor_unitario": float(preco_novo),
+                                "criado_por": usuario_atual,
+                            }).execute()
+                            registrar_auditoria("CADASTRO_MATERIAL", "materiais", f"{cat_novo.strip()} / {mat_novo.strip()}")
+                            st.success("Material cadastrado. Ele já pode aparecer no pedido.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Não foi possível cadastrar. Rode o SQL do SisPAC no Supabase se a tabela ainda não existir. ({e})")
+
+            df_cat_banco = carregar_materiais_banco()
+            if df_cat_banco.empty:
+                st.info("Ainda não há materiais só no banco. A planilha continua valendo.")
+            else:
+                st.dataframe(df_cat_banco, use_container_width=True, hide_index=True)
+
+        with col_est:
+            st.markdown("##### Entrada de lote")
+            nomes_catalogo = []
+            if not df_materiais.empty and col_material:
+                nomes_catalogo = sorted({str(x).strip() for x in df_materiais[col_material].dropna() if str(x).strip() not in MATERIAIS_INVALIDOS})
+            with st.form("form_entrada_lote"):
+                material_lote = st.selectbox("Material", nomes_catalogo if nomes_catalogo else ["Nenhum item"])
+                lote_input = st.text_input("Lote")
+                validade_input = st.date_input("Validade", value=date.today())
+                qtd_entrada = st.number_input("Quantidade", min_value=1, value=1)
+                fornecedor_input = st.text_input("Fornecedor (opcional)")
+                if st.form_submit_button("Registrar entrada"):
+                    if material_lote in MATERIAIS_INVALIDOS or material_lote == "Nenhum item" or not lote_input.strip():
+                        st.error("Informe material e lote.")
+                    else:
+                        try:
+                            supabase.rpc("sispac_entrada_lote", {
+                                "p_material": material_lote,
+                                "p_lote": lote_input.strip(),
+                                "p_validade": validade_input.strftime("%Y-%m-%d"),
+                                "p_quantidade": int(qtd_entrada),
+                                "p_fornecedor": fornecedor_input.strip(),
+                                "p_usuario": usuario_atual,
+                            }).execute()
+                            st.success("Entrada registrada. O saldo deste material passa a ser o dos lotes.")
+                            st.rerun()
+                        except Exception as e:
+                            if _rpc_ausente(e):
+                                try:
+                                    supabase.table("estoque_central").insert({
+                                        "material": material_lote,
+                                        "lote": lote_input.strip(),
+                                        "validade": validade_input.strftime("%Y-%m-%d"),
+                                        "quantidade_atual": int(qtd_entrada),
+                                        "fornecedor": fornecedor_input.strip() or "Não informado",
+                                    }).execute()
+                                    registrar_auditoria("ENTRADA_LOTE", "estoque_central", f"{material_lote} lote {lote_input.strip()}")
+                                    st.success("Entrada registrada (modo simples). Rode o SQL no Supabase para histórico completo e trava.")
+                                    st.rerun()
+                                except Exception as e2:
+                                    st.error(f"Erro ao registrar lote: {e2}")
+                            else:
+                                st.error(f"Erro ao registrar lote: {e}")
+
+        st.markdown("##### Lotes no estoque central")
+        try:
+            res_est = supabase.table("estoque_central").select("*").execute()
+            if res_est.data:
+                df_est = pd.DataFrame(res_est.data)
+                colunas_est = [c for c in ["material", "lote", "validade", "quantidade_atual", "fornecedor"] if c in df_est.columns]
+                st.dataframe(df_est[colunas_est] if colunas_est else df_est, use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum lote cadastrado. Enquanto isso, o saldo pode vir da planilha menos o já conferido.")
+        except Exception as e:
+            st.error(f"Erro ao ler estoque_central: {e}")
+
+        st.markdown("##### Histórico de movimentos")
+        try:
+            res_mov = (
+                supabase.table("movimentos_estoque")
+                .select("*")
+                .order("criado_em", desc=True)
+                .limit(200)
+                .execute()
+            )
+            if res_mov.data:
+                st.dataframe(pd.DataFrame(res_mov.data), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sem movimentos ainda. Eles aparecem após o SQL do SisPAC e a primeira entrada ou conferência.")
+        except Exception:
+            st.caption("Histórico indisponível até o SQL ser executado no Supabase.")
+
+        st.markdown("##### Auditoria")
+        try:
+            res_aud = (
+                supabase.table("sispac_auditoria")
+                .select("*")
+                .order("criado_em", desc=True)
+                .limit(100)
+                .execute()
+            )
+            if res_aud.data:
+                st.dataframe(pd.DataFrame(res_aud.data), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sem registros de auditoria ainda.")
+        except Exception:
+            st.caption("Tabela de auditoria ainda não existe no banco.")
