@@ -47,6 +47,8 @@ distritos_ubs = {
 url_google_sheets_materiais = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9dB5LFv3DRH9HRGwdmINwp2F0nE4V84gvV2L1EDPL4ETicGscJm-wGS1vMRacWjatmtmu2z29fppw/pub?output=csv"
 
 MATERIAIS_INVALIDOS = {"Erro", "Selecione Categoria", "Nenhuma", "Sem itens", ""}
+LIMIAR_ESTOQUE_BAIXO = 50
+LIMIAR_ESTOQUE_BAIXO = 50
 
 
 def normalizar_texto(texto):
@@ -250,6 +252,85 @@ def texto_outras_solicitacoes(resumo):
             continue
         partes.append(f"{linha['ubs']} ({linha['numero_pedido']}: {linha['quantidade']} un.)")
     return "; ".join(partes) if partes else "Nenhuma outra UBS aguardando este item."
+
+
+def quantidade_sugerida_pedido(estoque):
+    estoque = parse_numero(estoque, inteiro=True)
+    if estoque <= 0:
+        return 1
+    if estoque <= LIMIAR_ESTOQUE_BAIXO:
+        return estoque
+    return 10
+
+
+def sugerir_rateio(quantidades_pedidas, estoque):
+    estoque = max(0, parse_numero(estoque, inteiro=True))
+    pedidos = [max(0, parse_numero(q, inteiro=True)) for q in quantidades_pedidas]
+    demanda = sum(pedidos)
+    if not pedidos:
+        return []
+    if demanda <= 0:
+        return [0] * len(pedidos)
+    if estoque >= demanda:
+        return pedidos[:]
+    rateio = [int(estoque * q / demanda) for q in pedidos]
+    resto = estoque - sum(rateio)
+    while resto > 0:
+        avançou = False
+        for i, qtd in enumerate(pedidos):
+            if resto <= 0:
+                break
+            if rateio[i] < qtd:
+                rateio[i] += 1
+                resto -= 1
+                avançou = True
+        if not avançou:
+            break
+    return rateio
+
+
+def persistir_entregas(atualizacoes, obs_g=""):
+    numeros_afetados = []
+    for row_id, nova_qtd, row_original in atualizacoes:
+        qtd_ja_entregue = parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
+        delta_estoque = nova_qtd - qtd_ja_entregue
+        v_unit = float(row_original.get("valor_unitario") or 0)
+        dados_update = {
+            "quantidade_entregue": nova_qtd,
+            "custo_total": nova_qtd * v_unit,
+        }
+        if obs_g:
+            obs_ubs = str(row_original.get("observacao") or "").split(" | Gestão:")[0].strip()
+            dados_update["observacao"] = f"{obs_ubs} | Gestão: {obs_g}" if obs_ubs else f"Gestão: {obs_g}"
+        supabase.table("pedidos").update(dados_update).eq("id", row_id).execute()
+        aplicar_baixa_estoque_central(str(row_original.get("material") or "").strip(), delta_estoque)
+        numeros_afetados.append(str(row_original.get("numero_pedido") or ""))
+    atualizar_status_pedidos(numeros_afetados)
+
+
+def atualizar_status_pedidos(numeros):
+    for numero in {n for n in numeros if n}:
+        resposta = supabase.table("pedidos").select("id,quantidade,quantidade_entregue").eq("numero_pedido", numero).execute()
+        linhas = resposta.data or []
+        if not linhas:
+            continue
+        integral = True
+        alguma_entrega = False
+        for linha in linhas:
+            pedida = parse_numero(linha.get("quantidade"), inteiro=True)
+            entregue = parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+            if entregue > 0:
+                alguma_entrega = True
+            if entregue < pedida:
+                integral = False
+        if integral and alguma_entrega:
+            status = "Atendido Integralmente"
+        elif alguma_entrega:
+            status = "Atendido Parcialmente"
+        else:
+            continue
+        for linha in linhas:
+            supabase.table("pedidos").update({"status": status}).eq("id", linha["id"]).execute()
 
 
 def aplicar_baixa_estoque_central(material, delta):
@@ -456,7 +537,17 @@ with aba1:
         st.caption("O saldo só cai depois da conferência do almoxarifado.")
 
     with col3:
-        quantidade = st.number_input("3. Quantidade Necessária", min_value=1, value=10)
+        qtd_sugerida_form = quantidade_sugerida_pedido(estoque_disponivel_total)
+        quantidade = st.number_input(
+            "3. Quantidade Necessária",
+            min_value=1,
+            value=qtd_sugerida_form,
+            key=f"qtd_nec_{material}",
+        )
+        if 0 < estoque_disponivel_total <= LIMIAR_ESTOQUE_BAIXO:
+            st.caption(f"Sugerido **{qtd_sugerida_form} un.** (estoque baixo).")
+        elif estoque_disponivel_total <= 0:
+            st.caption("Sem saldo. A quantidade registra a demanda; o estoque não será baixado agora.")
         
     if st.button("➕ Adicionar Item ao Pedido", key="btn_adicionar_item"):
         if not material or material in MATERIAIS_INVALIDOS:
@@ -623,21 +714,148 @@ with aba2:
                             lambda n: status_consolidado_pedido(df_supabase[df_supabase["numero_pedido"] == n])
                         )
                         pedidos_unicos = pedidos_unicos[["numero_pedido", "data", "distrito", "ubs", "status"]]
-                        
-                        lista_opcoes = ["Selecione..."] + list(pedidos_unicos["numero_pedido"].unique())
-                        pedido_selecionado = st.selectbox("Escolha o número do pedido para ver ou conferir o comprovante:", lista_opcoes)
-                        
-                        if pedido_selecionado == "Selecione...":
-                            st.write("**Lista de Pedidos Realizados (com Status atualizado):**")
-                            st.dataframe(pedidos_unicos, use_container_width=True, hide_index=True)
+
+                        col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
+                        with col_f_st:
+                            filtro_status = st.selectbox(
+                                "Status",
+                                ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                key="filtro_status_conf",
+                            )
+                        with col_f_dist:
+                            filtro_distrito = st.selectbox(
+                                "Distrito",
+                                ["Todos"] + list(distritos_ubs.keys()),
+                                key="filtro_dist_conf",
+                            )
+                        with col_f_ubs:
+                            ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
+                            filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
+                        with col_f_agr:
+                            if st.session_state.perfil == "GESTAO":
+                                agrupamento = st.selectbox(
+                                    "Agrupar conferência",
+                                    ["Por pedido", "Por UBS", "Por material (rateio)"],
+                                    key="agrupamento_conf",
+                                )
+                            else:
+                                agrupamento = "Por pedido"
+                                st.selectbox("Agrupar conferência", ["Por pedido"], disabled=True, key="agrupamento_conf_ubs")
+
+                        df_lista = pedidos_unicos.copy()
+                        if filtro_status != "Todos":
+                            df_lista = df_lista[df_lista["status"] == filtro_status]
+                        if filtro_distrito != "Todos":
+                            df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
+                        if filtro_ubs != "Todas":
+                            df_lista = df_lista[df_lista["ubs"] == filtro_ubs]
+
+                        pedido_selecionado = "Selecione..."
+                        conferencia_por_material = agrupamento == "Por material (rateio)" and st.session_state.perfil == "GESTAO"
+
+                        if conferencia_por_material:
+                            st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
+                            st.caption("Quando várias UBS pedem o mesmo item com estoque baixo, o sistema sugere a divisão proporcional do saldo.")
+                            pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
+                            if filtro_distrito != "Todos":
+                                pendentes = pendentes[pendentes["distrito"] == filtro_distrito]
+                            if filtro_ubs != "Todas":
+                                pendentes = pendentes[pendentes["ubs"] == filtro_ubs]
+                            materiais_pendentes = sorted(pendentes["material"].dropna().astype(str).str.strip().unique().tolist()) if not pendentes.empty else []
+                            material_rateio = st.selectbox("Material para conferir", ["Selecione..."] + materiais_pendentes, key="mat_rateio_conf")
+                            if material_rateio != "Selecione..." and not pendentes.empty:
+                                linhas_mat = pendentes[pendentes["material"].astype(str).str.strip() == material_rateio].copy()
+                                saidas_conf = mapa_saidas_conferidas()
+                                saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
+                                mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
+                                estoque_atual = estoque_visivel(
+                                    material_rateio,
+                                    mapa_planilha_conf.get(material_rateio, 0),
+                                    saidas_conf,
+                                    saldos_lote_conf,
+                                    materiais_lote_conf,
+                                )
+                                qtds_pedidas = [parse_numero(q, inteiro=True) for q in linhas_mat["quantidade"].tolist()]
+                                sugestoes = sugerir_rateio(qtds_pedidas, estoque_atual)
+                                demanda_total = sum(qtds_pedidas)
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Estoque atual", f"{estoque_atual} un.")
+                                m2.metric("Demanda pendente", f"{demanda_total} un.")
+                                m3.metric("UBS solicitantes", linhas_mat["ubs"].nunique())
+                                if demanda_total > estoque_atual:
+                                    st.warning("Estoque insuficiente para atender todas as unidades. As quantidades sugeridas já estão rateadas.")
+
+                                with st.form(key=f"form_rateio_{material_rateio}"):
+                                    novas_quantidades_entregues = {}
+                                    for i, (idx, row) in enumerate(linhas_mat.iterrows()):
+                                        qtd_pedida = parse_numero(row["quantidade"], inteiro=True)
+                                        max_entregue = max(0, min(qtd_pedida, estoque_atual if demanda_total <= estoque_atual else qtd_pedida))
+                                        sugerido = min(sugestoes[i] if i < len(sugestoes) else 0, max_entregue)
+                                        c1, c2, c3, c4 = st.columns([1.3, 2.2, 1, 1])
+                                        c1.write(f"**{row['ubs']}**")
+                                        c2.write(f"{row['numero_pedido']}")
+                                        c3.write(f"Pediu: {qtd_pedida}")
+                                        val_entregue = c4.number_input(
+                                            f"Entregar ({row['ubs']})",
+                                            min_value=0,
+                                            max_value=qtd_pedida,
+                                            value=sugerido,
+                                            key=f"rateio_{row['id'] if 'id' in row else idx}",
+                                        )
+                                        novas_quantidades_entregues[row["id"] if "id" in row else idx] = val_entregue
+                                    obs_gestao = st.text_input("Observação da Gestão (Opcional)", key=f"obs_rateio_{material_rateio}")
+                                    btn_salvar_rateio = st.form_submit_button("💾 Salvar rateio e baixar estoque")
+                                    if btn_salvar_rateio:
+                                        try:
+                                            soma_entrega = sum(novas_quantidades_entregues.values())
+                                            if soma_entrega > estoque_atual:
+                                                st.error(f"A soma entregue ({soma_entrega}) ultrapassa o estoque ({estoque_atual}). Ajuste o rateio.")
+                                            else:
+                                                atualizacoes = []
+                                                for row_id, nova_qtd in novas_quantidades_entregues.items():
+                                                    row_original = linhas_mat[linhas_mat["id"] == row_id].iloc[0] if "id" in linhas_mat.columns else linhas_mat.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
+                                                    atualizacoes.append((row_id, nova_qtd, row_original))
+                                                persistir_entregas(atualizacoes, (obs_gestao or "").strip())
+                                                st.success("Rateio salvo. Estoque baixado com o total entregue deste material.")
+                                                st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao salvar rateio: {e}")
+
+                            st.markdown("---")
+                            st.write("**Fila de pedidos (para comprovante):**")
+                            st.dataframe(df_lista, use_container_width=True, hide_index=True)
+                            lista_opcoes = ["Selecione..."] + list(df_lista["numero_pedido"].unique())
+                            pedido_selecionado = st.selectbox("Abrir comprovante de um pedido:", lista_opcoes, key="pedido_comp_rateio")
                         else:
+                            if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
+                                ubs_grupo = st.selectbox(
+                                    "Escolha a UBS para ver os pedidos agrupados",
+                                    ["Selecione..."] + sorted(df_lista["ubs"].dropna().astype(str).unique().tolist()),
+                                    key="ubs_grupo_conf",
+                                )
+                                if ubs_grupo != "Selecione...":
+                                    df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
+
+                            def rotulo_pedido(row):
+                                return f"{row['ubs']} | {row['data']} | {row['status']} | {row['numero_pedido']}"
+
+                            mapa_rotulos = {rotulo_pedido(row): row["numero_pedido"] for _, row in df_lista.iterrows()}
+                            lista_rotulos = ["Selecione..."] + list(mapa_rotulos.keys())
+                            rotulo_escolhido = st.selectbox("Escolha o pedido para conferir ou ver o comprovante:", lista_rotulos, key="pedido_rotulo_conf")
+                            pedido_selecionado = mapa_rotulos.get(rotulo_escolhido, "Selecione...")
+
+                            if rotulo_escolhido == "Selecione...":
+                                st.write("**Lista de Pedidos (agrupada pelos filtros acima):**")
+                                st.dataframe(df_lista, use_container_width=True, hide_index=True)
+                        
+                        if pedido_selecionado != "Selecione...":
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = status_consolidado_pedido(detalhes)
 
                             # Tela de Conferência exclusiva para a Gestão
-                            if st.session_state.perfil == "GESTAO":
+                            if st.session_state.perfil == "GESTAO" and not conferencia_por_material:
                                 st.markdown("### 📦 Painel de Conferência do Almoxarifado (Itens Entregues)")
-                                st.info("O estoque exibido é o saldo físico atual. Pedidos simultâneos de outras UBS **não baixam** o estoque até a conferência; use a coluna de pendências para ratear o que existe.")
+                                st.info("Com estoque baixo, a quantidade sugerida já considera o rateio com outras UBS que pediram o mesmo item.")
 
                                 saidas_conf = mapa_saidas_conferidas()
                                 saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
@@ -660,12 +878,17 @@ with aba2:
                                         )
                                         teto_fisico = estoque_atual + (qtd_db_entregue if ja_baixou_estoque else 0)
                                         max_entregue = max(0, min(qtd_pedida, teto_fisico))
+                                        demanda = demanda_pendente_material(df_supabase, mat, pedido_selecionado)
                                         if qtd_db_entregue == 0 and not ja_baixou_estoque:
-                                            qtd_sugerida = min(qtd_pedida, max_entregue)
+                                            if demanda["outras_ubs"] > 0:
+                                                qtd_sugerida = sugerir_rateio([qtd_pedida, demanda["outras_ubs"]], estoque_atual)[0]
+                                            else:
+                                                qtd_sugerida = min(qtd_pedida, max_entregue)
+                                            qtd_sugerida = min(qtd_sugerida, max_entregue)
+                                            if 0 < estoque_atual <= LIMIAR_ESTOQUE_BAIXO:
+                                                qtd_sugerida = min(qtd_sugerida, estoque_atual, qtd_pedida)
                                         else:
                                             qtd_sugerida = min(qtd_db_entregue, max_entregue)
-
-                                        demanda = demanda_pendente_material(df_supabase, mat, pedido_selecionado)
                                             
                                         c_mat, c_est, c_ped, c_ent = st.columns([2.2, 1.6, 1, 1])
                                         c_mat.write(f"**{mat}** (Cat: {row['categoria']})")
@@ -675,6 +898,8 @@ with aba2:
                                                 f"<span style='color:#d35400; font-size:12px;'>Outras UBS pediram {demanda['outras_ubs']} un. (ainda não conferido)</span>",
                                                 unsafe_allow_html=True,
                                             )
+                                        elif 0 < estoque_atual <= LIMIAR_ESTOQUE_BAIXO:
+                                            c_est.markdown(f"**Estoque baixo:** {estoque_atual} un.")
                                         else:
                                             c_est.markdown(f"**Estoque:** {estoque_atual} un.")
                                         c_ped.write(f"Solicitado: {qtd_pedida}")
@@ -687,13 +912,11 @@ with aba2:
                                             key=f"ent_{row['id'] if 'id' in row else idx}"
                                         )
                                         novas_quantidades_entregues[row['id'] if 'id' in row else idx] = val_entregue
-
-                                        if demanda["outras_ubs"] > 0:
-                                            st.caption(f"Mesmo item em aberto: {texto_outras_solicitacoes(demanda)}. Saldo compartilhado: {estoque_atual} un. para todos.")
+                                        if 0 < estoque_atual <= LIMIAR_ESTOQUE_BAIXO or demanda["outras_ubs"] > 0:
+                                            st.caption(f"Quantidade sugerida: **{qtd_sugerida} un.** (estoque baixo / rateio). {texto_outras_solicitacoes(demanda)}")
                                         if demanda["total"] > estoque_atual and not ja_baixou_estoque:
                                             st.warning(
-                                                f"Demanda pendente de **{mat}** ({demanda['total']} un., incluindo este pedido) é maior que o estoque ({estoque_atual} un.). "
-                                                "A entrega deste pedido não pode ultrapassar o saldo; o restante fica para as outras unidades ou para reposição."
+                                                f"Demanda pendente de **{mat}** ({demanda['total']} un., incluindo este pedido) é maior que o estoque ({estoque_atual} un.)."
                                             )
 
                                     obs_gestao = st.text_input("Observação da Gestão / Almoxarifado (Opcional)", value="", key=f"obs_g_{pedido_selecionado}")
@@ -701,33 +924,11 @@ with aba2:
                                     btn_salvar_conf = st.form_submit_button("💾 Salvar Conferência e Atualizar Entregas")
                                     if btn_salvar_conf:
                                         try:
-                                            algum_parcial = False
                                             atualizacoes = []
                                             for row_id, nova_qtd in novas_quantidades_entregues.items():
                                                 row_original = detalhes[detalhes['id'] == row_id].iloc[0] if 'id' in detalhes.columns else detalhes.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
-                                                qtd_original = int(row_original['quantidade'])
-                                                v_unit = float(row_original['valor_unitario'])
-                                                if nova_qtd < qtd_original:
-                                                    algum_parcial = True
-                                                atualizacoes.append((row_id, nova_qtd, nova_qtd * v_unit, row_original))
-
-                                            status_pedido = "Atendido Parcialmente" if algum_parcial else "Atendido Integralmente"
-                                            obs_g = (obs_gestao or "").strip()
-
-                                            for row_id, nova_qtd, novo_custo_total, row_original in atualizacoes:
-                                                qtd_ja_entregue = parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
-                                                delta_estoque = nova_qtd - qtd_ja_entregue
-                                                dados_update = {
-                                                    "quantidade_entregue": nova_qtd,
-                                                    "custo_total": novo_custo_total,
-                                                    "status": status_pedido,
-                                                }
-                                                if obs_g:
-                                                    obs_ubs = str(row_original.get("observacao") or "").split(" | Gestão:")[0].strip()
-                                                    dados_update["observacao"] = f"{obs_ubs} | Gestão: {obs_g}" if obs_ubs else f"Gestão: {obs_g}"
-                                                supabase.table("pedidos").update(dados_update).eq("id", row_id).execute()
-                                                aplicar_baixa_estoque_central(str(row_original.get("material") or "").strip(), delta_estoque)
-                                            
+                                                atualizacoes.append((row_id, nova_qtd, row_original))
+                                            persistir_entregas(atualizacoes, (obs_gestao or "").strip())
                                             st.success("✅ Conferência salva. Estoque baixado com a quantidade entregue e centro de custos atualizado.")
                                             st.rerun()
                                         except Exception as e:
