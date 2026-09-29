@@ -4,9 +4,16 @@ import time
 import re
 import unicodedata
 from datetime import datetime
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 from supabase import create_client, Client
+
+try:
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+    FPDF_DISPONIVEL = True
+except ImportError:
+    FPDF_DISPONIVEL = False
+    FPDF = object
+    XPos = YPos = None
 
 # ==========================================
 # 1. CONFIGURAÇÕES INICIAIS
@@ -261,11 +268,110 @@ def texto_pdf(valor):
     return texto.encode("latin-1", "replace").decode("latin-1")
 
 
-class PdfSisPAC(FPDF):
-    def footer(self):
-        self.set_y(-12)
-        self.set_font("Helvetica", "I", 8)
-        self.cell(0, 6, texto_pdf(f"SisPAC - pagina {self.page_no()}"), align="C")
+def _pdf_escape(texto):
+    return texto_pdf(texto).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def gerar_pdf_basico(linhas):
+    """PDF simples (sem biblioteca extra) para o Streamlit Cloud enquanto o fpdf2 nao estiver instalado."""
+    linhas_pagina = 48
+    paginas = [linhas[i:i + linhas_pagina] or [""] for i in range(0, max(len(linhas), 1), linhas_pagina)]
+    conteudos = []
+    for pagina in paginas:
+        cmds = ["BT /F1 11 Tf 50 800 Td"]
+        for i, linha in enumerate(pagina):
+            if i:
+                cmds.append("0 -15 Td")
+            cmds.append(f"({_pdf_escape(linha)}) Tj")
+        cmds.append("ET")
+        conteudos.append("\n".join(cmds) + "\n")
+
+    objetos = ["<< /Type /Catalog /Pages 2 0 R >>"]
+    kids = " ".join(f"{3 + i} 0 R" for i in range(len(conteudos)))
+    objetos.append(f"<< /Type /Pages /Kids [{kids}] /Count {len(conteudos)} >>")
+    stream_ids = []
+    proximo = 3 + len(conteudos)
+    for i, stream in enumerate(conteudos):
+        stream_id = proximo + i
+        stream_ids.append(stream_id)
+        objetos.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 {proximo + len(conteudos)} 0 R >> >> /Contents {stream_id} 0 R >>"
+        )
+    for stream in conteudos:
+        objetos.append(f"<< /Length {len(stream.encode('latin-1'))} >>\nstream\n{stream}endstream")
+    objetos.append("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    pdf = ["%PDF-1.4"]
+    offsets = [0]
+    cursor = 9
+    for i, obj in enumerate(objetos, start=1):
+        offsets.append(cursor)
+        bloco = f"{i} 0 obj\n{obj}\nendobj\n"
+        pdf.append(bloco)
+        cursor += len(bloco.encode("latin-1"))
+    xref_pos = cursor
+    xref = [f"xref\n0 {len(objetos) + 1}\n0000000000 65535 f \n"]
+    for off in offsets[1:]:
+        xref.append(f"{off:010d} 00000 n \n")
+    trailer = f"trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF"
+    return "".join(["%PDF-1.4\n"] + pdf[1:] + xref + [trailer]).encode("latin-1")
+
+
+def linhas_comprovante(detalhes, status_atual, sem_custo=True):
+    via = "via operacional - sem valores" if sem_custo else "via gerencial - com custos"
+    linhas = [
+        "SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS",
+        f"Comprovante de Requisicao e Entrega - SisPAC ({via})",
+        "",
+        f"No do Pedido: {detalhes['numero_pedido'].iloc[0] if 'numero_pedido' in detalhes.columns else ''}",
+        f"Data/Hora do envio: {detalhes['data'].iloc[0]}",
+        f"Distrito: {detalhes['distrito'].iloc[0]}",
+        f"Unidade (UBS): {detalhes['ubs'].iloc[0]}",
+        f"Status: {status_atual}",
+        "",
+    ]
+    if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
+        obs = str(detalhes["observacao"].iloc[0]).strip()
+        if obs:
+            linhas += ["Observacoes:", obs, ""]
+    custo_total = 0.0
+    for cat in detalhes["categoria"].unique():
+        df_cat = detalhes[detalhes["categoria"] == cat]
+        linhas.append(f"Categoria: {cat}")
+        if sem_custo:
+            linhas.append("Material | Solicitado | Entregue")
+        else:
+            subtotal = float(df_cat["custo_total"].sum()) if "custo_total" in df_cat.columns else 0.0
+            custo_total += subtotal
+            linhas.append(f"Subtotal: {formatar_moeda_br(subtotal)}")
+            linhas.append("Material | Solic. | Entregue | Vl. unitario | Custo")
+        for _, linha in df_cat.iterrows():
+            base = f"{linha['material']} | {parse_numero(linha['quantidade'], True)} | {parse_numero(linha.get('quantidade_entregue'), True)}"
+            if not sem_custo:
+                base += f" | {formatar_moeda_br(linha.get('valor_unitario', 0))} | {formatar_moeda_br(linha.get('custo_total', 0))}"
+            linhas.append(base)
+        linhas.append("")
+    if not sem_custo:
+        linhas.append(f"Custo total efetivo: {formatar_moeda_br(custo_total)}")
+        linhas.append("")
+    linhas += [
+        "Almoxarifado Central - Assinatura e carimbo",
+        "",
+        "Recebimento na UBS - Assinatura do responsavel",
+    ]
+    return linhas
+
+
+if FPDF_DISPONIVEL:
+    class PdfSisPAC(FPDF):
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 8)
+            self.cell(0, 6, texto_pdf(f"SisPAC - pagina {self.page_no()}"), align="C")
+else:
+    class PdfSisPAC:
+        pass
 
 
 def pdf_para_bytes(pdf):
@@ -285,6 +391,8 @@ def pdf_celula(pdf, largura, altura, texto, negrito=False, alinhar="L"):
 
 
 def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
+    if not FPDF_DISPONIVEL:
+        return gerar_pdf_basico(linhas_comprovante(detalhes, status_atual, sem_custo))
     pdf = PdfSisPAC(format="A4", unit="mm")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
@@ -361,6 +469,22 @@ def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
 
 
 def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer):
+    if not FPDF_DISPONIVEL:
+        parecer_limpo = re.sub(r"<[^>]+>", "", str(parecer))
+        linhas = [
+            "SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS",
+            str(titulo),
+            "",
+            f"Distrito / Unidade: {distrito} / {ubs}",
+            f"Periodo abrangido: {periodo}",
+            f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            "",
+        ]
+        linhas.append(" | ".join(str(c) for c in df_print.columns))
+        for _, linha in df_print.iterrows():
+            linhas.append(" | ".join(str(linha[c]) for c in df_print.columns))
+        linhas += ["", "Parecer tecnico:", parecer_limpo, "", "Gestao do Almoxarifado - Assinatura e carimbo"]
+        return gerar_pdf_basico(linhas)
     pdf = PdfSisPAC(format="A4", unit="mm")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
