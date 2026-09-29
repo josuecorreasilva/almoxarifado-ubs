@@ -195,6 +195,63 @@ def estoque_visivel(material, estoque_planilha, saidas, saldos_lote, materiais_c
     return max(0, parse_numero(estoque_planilha, inteiro=True) - saidas.get(material, 0))
 
 
+def mapa_estoque_planilha(df_materiais, col_material, col_estoque):
+    mapa = {}
+    if df_materiais is None or df_materiais.empty or not col_material:
+        return mapa
+    for _, linha in df_materiais.iterrows():
+        material = str(linha.get(col_material) or "").strip()
+        if not material:
+            continue
+        mapa[material] = parse_numero(linha.get(col_estoque), inteiro=True) if col_estoque else 0
+    return mapa
+
+
+def demanda_pendente_material(df_pedidos, material, numero_pedido_atual=None):
+    resumo = {
+        "total": 0,
+        "este_pedido": 0,
+        "outras_ubs": 0,
+        "linhas": [],
+    }
+    if df_pedidos is None or df_pedidos.empty:
+        return resumo
+    material = str(material or "").strip()
+    for _, linha in df_pedidos.iterrows():
+        if str(linha.get("material") or "").strip() != material:
+            continue
+        status = str(linha.get("status") or "Pedido enviado")
+        if status in {"Atendido Parcialmente", "Atendido Integralmente"}:
+            continue
+        quantidade = parse_numero(linha.get("quantidade"), inteiro=True)
+        numero = str(linha.get("numero_pedido") or "")
+        ubs = str(linha.get("ubs") or "")
+        eh_este = numero == str(numero_pedido_atual or "")
+        resumo["total"] += quantidade
+        if eh_este:
+            resumo["este_pedido"] += quantidade
+        else:
+            resumo["outras_ubs"] += quantidade
+        resumo["linhas"].append({
+            "ubs": ubs,
+            "numero_pedido": numero,
+            "quantidade": quantidade,
+            "este_pedido": eh_este,
+        })
+    return resumo
+
+
+def texto_outras_solicitacoes(resumo):
+    if not resumo["linhas"]:
+        return "Nenhum outro pedido pendente deste item."
+    partes = []
+    for linha in resumo["linhas"]:
+        if linha["este_pedido"]:
+            continue
+        partes.append(f"{linha['ubs']} ({linha['numero_pedido']}: {linha['quantidade']} un.)")
+    return "; ".join(partes) if partes else "Nenhuma outra UBS aguardando este item."
+
+
 def aplicar_baixa_estoque_central(material, delta):
     delta = int(delta or 0)
     if delta == 0:
@@ -580,30 +637,64 @@ with aba2:
                             # Tela de Conferência exclusiva para a Gestão
                             if st.session_state.perfil == "GESTAO":
                                 st.markdown("### 📦 Painel de Conferência do Almoxarifado (Itens Entregues)")
-                                st.info("Insira a quantidade **efetivamente entregue**. O estoque só é baixado nesta conferência; o envio do pedido pela UBS não altera o saldo.")
+                                st.info("O estoque exibido é o saldo físico atual. Pedidos simultâneos de outras UBS **não baixam** o estoque até a conferência; use a coluna de pendências para ratear o que existe.")
+
+                                saidas_conf = mapa_saidas_conferidas()
+                                saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
+                                mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
+                                ja_baixou_estoque = status_atual in {"Atendido Parcialmente", "Atendido Integralmente"}
                                 
                                 with st.form(key=f"form_conferencia_{pedido_selecionado}"):
                                     novas_quantidades_entregues = {}
                                     
                                     for idx, row in detalhes.iterrows():
-                                        mat = row['material']
+                                        mat = str(row['material']).strip()
                                         qtd_pedida = int(row['quantidade'])
-                                        qtd_atual_entregue = int(row['quantidade_entregue']) if pd.notna(row['quantidade_entregue']) else 0
-                                        if qtd_atual_entregue == 0 and status_atual == "Pedido enviado":
-                                            qtd_atual_entregue = qtd_pedida # Sugere o total pedido por padrão na primeira conferência
+                                        qtd_db_entregue = int(row['quantidade_entregue']) if pd.notna(row['quantidade_entregue']) else 0
+                                        estoque_atual = estoque_visivel(
+                                            mat,
+                                            mapa_planilha_conf.get(mat, 0),
+                                            saidas_conf,
+                                            saldos_lote_conf,
+                                            materiais_lote_conf,
+                                        )
+                                        teto_fisico = estoque_atual + (qtd_db_entregue if ja_baixou_estoque else 0)
+                                        max_entregue = max(0, min(qtd_pedida, teto_fisico))
+                                        if qtd_db_entregue == 0 and not ja_baixou_estoque:
+                                            qtd_sugerida = min(qtd_pedida, max_entregue)
+                                        else:
+                                            qtd_sugerida = min(qtd_db_entregue, max_entregue)
+
+                                        demanda = demanda_pendente_material(df_supabase, mat, pedido_selecionado)
                                             
-                                        c_mat, c_ped, c_ent = st.columns([3, 1, 1])
+                                        c_mat, c_est, c_ped, c_ent = st.columns([2.2, 1.6, 1, 1])
                                         c_mat.write(f"**{mat}** (Cat: {row['categoria']})")
+                                        if demanda["outras_ubs"] > 0:
+                                            c_est.markdown(
+                                                f"**Estoque:** {estoque_atual} un.<br>"
+                                                f"<span style='color:#d35400; font-size:12px;'>Outras UBS pediram {demanda['outras_ubs']} un. (ainda não conferido)</span>",
+                                                unsafe_allow_html=True,
+                                            )
+                                        else:
+                                            c_est.markdown(f"**Estoque:** {estoque_atual} un.")
                                         c_ped.write(f"Solicitado: {qtd_pedida}")
                                         
                                         val_entregue = c_ent.number_input(
                                             f"Entregue ({mat})", 
                                             min_value=0, 
-                                            max_value=max(qtd_pedida, 0), 
-                                            value=min(qtd_atual_entregue, qtd_pedida),
+                                            max_value=max(max_entregue, 0), 
+                                            value=qtd_sugerida,
                                             key=f"ent_{row['id'] if 'id' in row else idx}"
                                         )
                                         novas_quantidades_entregues[row['id'] if 'id' in row else idx] = val_entregue
+
+                                        if demanda["outras_ubs"] > 0:
+                                            st.caption(f"Mesmo item em aberto: {texto_outras_solicitacoes(demanda)}. Saldo compartilhado: {estoque_atual} un. para todos.")
+                                        if demanda["total"] > estoque_atual and not ja_baixou_estoque:
+                                            st.warning(
+                                                f"Demanda pendente de **{mat}** ({demanda['total']} un., incluindo este pedido) é maior que o estoque ({estoque_atual} un.). "
+                                                "A entrega deste pedido não pode ultrapassar o saldo; o restante fica para as outras unidades ou para reposição."
+                                            )
 
                                     obs_gestao = st.text_input("Observação da Gestão / Almoxarifado (Opcional)", value="", key=f"obs_g_{pedido_selecionado}")
                                     
