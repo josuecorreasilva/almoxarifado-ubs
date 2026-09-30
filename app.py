@@ -179,9 +179,10 @@ st.markdown("""
     .st-key-lista_pedidos div.stButton > button {
         text-align: left !important;
         justify-content: flex-start !important;
-        font-size: 0.86rem !important;
+        font-size: 0.8rem !important;
         font-weight: 500 !important;
-        padding: 0.4rem 0.7rem !important;
+        padding: 0.28rem 0.55rem !important;
+        min-height: 0 !important;
         border: 1px solid #d5e4e6 !important;
         background: #f7fafb !important;
         color: #1a3338 !important;
@@ -292,21 +293,15 @@ def render_lista_pedidos_clicavel(df_lista, chave):
         st.info("Nenhum pedido encontrado.")
         return
     df_lista = df_lista.reset_index(drop=True)
-    col_lista, _ = st.columns([0.62, 1.38])
+    col_lista, _ = st.columns([0.5, 1.5])
     with col_lista:
         with st.container(key="lista_pedidos"):
-            st.markdown("**Pedidos**")
-            st.caption("Lista à esquerda — clique para abrir.")
             for i, row in df_lista.iterrows():
                 numero = str(row["numero_pedido"])
-                data_txt = str(row.get("data") or "")
-                if len(data_txt) > 16:
-                    data_txt = data_txt[:16]
                 rotulo = f"{numero}  ·  {row.get('ubs', '')}"
                 if st.button(rotulo, key=f"{chave}_{i}_{numero}", use_container_width=True):
                     st.session_state.pedido_aberto = numero
                     st.rerun()
-                st.caption(f"{data_txt}  ·  {row.get('status', '')}  ·  {int(row.get('itens') or 0)} item(ns)")
 
 
 def status_consolidado_pedido(df_itens):
@@ -1573,7 +1568,7 @@ with aba2:
     if st.session_state.perfil == "GESTAO":
         st.markdown(
             "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila e conferência. Relatórios abrem em tela própria, sem este menu.</p></div>",
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Conferência na ordem de chegada. Relatórios abrem em tela própria.</p></div>",
             unsafe_allow_html=True,
         )
     else:
@@ -1635,7 +1630,7 @@ with aba2:
                         else:
                             modo_aba2 = st.radio(
                                 "Área",
-                                ["Fila de chegada", "Pedidos e conferência", "Relatórios"],
+                                ["Pedidos e conferência", "Relatórios"],
                                 horizontal=True,
                                 key="radio_area_painel",
                             )
@@ -1649,7 +1644,7 @@ with aba2:
                     
                     st.markdown("---")
                     
-                    if modo_aba2 in ("Fila de chegada", "Pedidos e conferência"):
+                    if modo_aba2 == "Pedidos e conferência":
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
@@ -1667,91 +1662,64 @@ with aba2:
 
                         conferencia_por_material = False
 
-                        if modo_aba2 == "Fila de chegada":
-                            st.markdown("### 📥 Fila de Chegada")
-                            st.caption("Área independente dos filtros. Os pedidos aparecem na ordem em que chegaram (do mais antigo ao mais recente), com identificação da unidade.")
-
-                            col_fila_1, col_fila_2 = st.columns([2, 1])
-                            with col_fila_1:
-                                so_pendentes = st.checkbox(
-                                    "Mostrar só os que aguardam conferência",
-                                    value=(st.session_state.perfil == "GESTAO"),
-                                    key="fila_so_pendentes",
-                                )
-
-                            df_fila = pedidos_unicos.copy()
-                            if so_pendentes:
-                                df_fila = df_fila[df_fila["status"] == "Pedido enviado"]
-                            df_fila = df_fila.sort_values(by="data", ascending=True).reset_index(drop=True)
-                            df_fila.insert(0, "ordem", range(1, len(df_fila) + 1))
-                            df_fila_exibir = df_fila.rename(columns={
-                                "ordem": "Ordem de chegada",
-                                "numero_pedido": "Identificação do pedido",
-                                "data": "Data/hora",
-                                "distrito": "Distrito",
-                                "ubs": "UBS",
-                                "status": "Status",
-                                "itens": "Itens",
-                            })
-                            with col_fila_2:
-                                st.metric("Pedidos na fila", len(df_fila_exibir))
-
-                            if df_fila_exibir.empty:
-                                st.info("Não há pedidos nesta fila no momento.")
-                            else:
-                                busca_fila = st.text_input("Buscar número do pedido", key="busca_num_pedido_fila")
-                                df_fila_click = filtrar_pedidos_por_numero(df_fila, busca_fila)
-                                render_lista_pedidos_clicavel(df_fila_click, "fila")
-                                if busca_fila.strip() and (df_fila_click is None or df_fila_click.empty):
-                                    st.warning("Nenhum pedido com esse número.")
-                                elif busca_fila.strip() and len(df_fila_click) == 1:
-                                    st.session_state.pedido_aberto = str(df_fila_click.iloc[0]["numero_pedido"])
-                        else:
-                            if st.session_state.perfil == "GESTAO":
-                                col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
-                                with col_f_st:
-                                    filtro_status = st.selectbox(
-                                        "Status",
-                                        ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
-                                        key="filtro_status_conf",
-                                    )
-                                with col_f_dist:
-                                    filtro_distrito = st.selectbox(
-                                        "Distrito",
-                                        ["Todos"] + list(distritos_ubs.keys()),
-                                        key="filtro_dist_conf",
-                                    )
-                                with col_f_ubs:
-                                    ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
-                                    filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
-                                with col_f_agr:
-                                    agrupamento = st.selectbox(
-                                        "Agrupar conferência",
-                                        ["Por pedido", "Por UBS", "Por material (rateio)"],
-                                        key="agrupamento_conf",
-                                    )
-                            else:
+                        if st.session_state.perfil == "GESTAO":
+                            so_pendentes = st.checkbox(
+                                "Fila: só os que aguardam conferência (ordem de chegada)",
+                                value=True,
+                                key="fila_so_pendentes",
+                            )
+                            col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
+                            with col_f_st:
                                 filtro_status = st.selectbox(
                                     "Status",
                                     ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                    index=1 if so_pendentes else 0,
+                                    disabled=so_pendentes,
                                     key="filtro_status_conf",
                                 )
-                                filtro_distrito = "Todos"
-                                filtro_ubs = "Todas"
-                                agrupamento = "Por pedido"
+                            with col_f_dist:
+                                filtro_distrito = st.selectbox(
+                                    "Distrito",
+                                    ["Todos"] + list(distritos_ubs.keys()),
+                                    key="filtro_dist_conf",
+                                )
+                            with col_f_ubs:
+                                ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
+                                filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
+                            with col_f_agr:
+                                agrupamento = st.selectbox(
+                                    "Agrupar conferência",
+                                    ["Por pedido", "Por UBS", "Por material (rateio)"],
+                                    key="agrupamento_conf",
+                                )
+                            if so_pendentes:
+                                filtro_status = "Pedido enviado"
+                        else:
+                            so_pendentes = False
+                            filtro_status = st.selectbox(
+                                "Status",
+                                ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
+                                key="filtro_status_conf",
+                            )
+                            filtro_distrito = "Todos"
+                            filtro_ubs = "Todas"
+                            agrupamento = "Por pedido"
 
-                            df_lista = pedidos_unicos.copy()
-                            if filtro_status != "Todos":
-                                df_lista = df_lista[df_lista["status"] == filtro_status]
-                            if filtro_distrito != "Todos":
-                                df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
-                            if filtro_ubs != "Todas":
-                                df_lista = df_lista[df_lista["ubs"] == filtro_ubs]
+                        df_lista = pedidos_unicos.copy()
+                        if filtro_status != "Todos":
+                            df_lista = df_lista[df_lista["status"] == filtro_status]
+                        if filtro_distrito != "Todos":
+                            df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
+                        if filtro_ubs != "Todas":
+                            df_lista = df_lista[df_lista["ubs"] == filtro_ubs]
+                        if so_pendentes:
+                            df_lista = df_lista.sort_values(by="data", ascending=True)
+                        else:
                             df_lista = df_lista.sort_values(by="data", ascending=False)
 
-                            conferencia_por_material = agrupamento == "Por material (rateio)" and st.session_state.perfil == "GESTAO"
+                        conferencia_por_material = agrupamento == "Por material (rateio)" and st.session_state.perfil == "GESTAO"
 
-                            if conferencia_por_material:
+                        if conferencia_por_material:
                                 st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
                                 st.caption("Quando várias UBS pedem o mesmo item com estoque baixo, o sistema sugere a divisão proporcional do saldo.")
                                 pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
@@ -1828,24 +1796,24 @@ with aba2:
                                     st.warning("Nenhum pedido com esse número.")
                                 elif busca_rateio.strip() and len(df_lista_rateio) == 1:
                                     st.session_state.pedido_aberto = str(df_lista_rateio.iloc[0]["numero_pedido"])
-                            else:
-                                if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
-                                    ubs_grupo = st.selectbox(
-                                        "Escolha a UBS para ver os pedidos agrupados",
-                                        ["Selecione..."] + sorted(df_lista["ubs"].dropna().astype(str).unique().tolist()),
-                                        key="ubs_grupo_conf",
-                                    )
-                                    if ubs_grupo != "Selecione...":
-                                        df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
+                        else:
+                            if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
+                                ubs_grupo = st.selectbox(
+                                    "Escolha a UBS para ver os pedidos agrupados",
+                                    ["Selecione..."] + sorted(df_lista["ubs"].dropna().astype(str).unique().tolist()),
+                                    key="ubs_grupo_conf",
+                                )
+                                if ubs_grupo != "Selecione...":
+                                    df_lista = df_lista[df_lista["ubs"] == ubs_grupo]
 
-                                busca_pedido = st.text_input("Buscar número do pedido", placeholder="Ex.: PED-0012", key="busca_num_pedido_acomp")
-                                df_lista = filtrar_pedidos_por_numero(df_lista, busca_pedido)
-                                if busca_pedido.strip() and (df_lista is None or df_lista.empty):
-                                    st.warning("Nenhum pedido com esse número.")
-                                else:
-                                    if busca_pedido.strip() and len(df_lista) == 1:
-                                        st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
-                                    render_lista_pedidos_clicavel(df_lista, "acomp")
+                            busca_pedido = st.text_input("Buscar número do pedido", placeholder="Ex.: PED-0012", key="busca_num_pedido_acomp")
+                            df_lista = filtrar_pedidos_por_numero(df_lista, busca_pedido)
+                            if busca_pedido.strip() and (df_lista is None or df_lista.empty):
+                                st.warning("Nenhum pedido com esse número.")
+                            else:
+                                if busca_pedido.strip() and len(df_lista) == 1:
+                                    st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
+                                render_lista_pedidos_clicavel(df_lista, "acomp")
 
                         pedido_selecionado = st.session_state.get("pedido_aberto") or "Selecione..."
                         if pedido_selecionado not in set(pedidos_unicos["numero_pedido"].astype(str)):
