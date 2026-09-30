@@ -185,6 +185,20 @@ st.markdown("""
         padding: 0.25rem 0.45rem !important;
         min-height: 0 !important;
     }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] {
+        justify-content: flex-start !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child {
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child .stButton {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
     .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button {
         width: 100% !important;
         justify-content: flex-start !important;
@@ -200,9 +214,21 @@ st.markdown("""
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button p,
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"],
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"] p {
+        text-align: left !important;
+        justify-content: flex-start !important;
+        width: 100% !important;
+        margin: 0 !important;
+    }
     .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button:hover {
         background: #eaf2f8 !important;
         color: #1a5276 !important;
+    }
+    .area-impressao s {
+        text-decoration: line-through;
+        color: #7b241c;
     }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
@@ -496,8 +522,34 @@ def gerar_pdf_basico(linhas):
     return "".join(["%PDF-1.4\n"] + pdf[1:] + xref + [trailer]).encode("latin-1")
 
 
+def item_solicitado_nao_reenviado(row, status_pedido):
+    status_item = str(row.get("status") or "")
+    if not (pedido_concluido(status_item) or pedido_concluido(status_pedido)):
+        return False
+    return parse_numero(row.get("quantidade"), True) > parse_numero(row.get("quantidade_entregue"), True)
+
+
+def pedido_tem_item_parcial(detalhes, status_pedido):
+    if detalhes is None or detalhes.empty:
+        return False
+    return any(item_solicitado_nao_reenviado(row, status_pedido) for _, row in detalhes.iterrows())
+
+
+def html_qtd_solicitada(row, status_pedido):
+    qtd = parse_numero(row.get("quantidade"), True)
+    if item_solicitado_nao_reenviado(row, status_pedido):
+        return f"<s>{qtd}</s>"
+    return str(qtd)
+
+
+AVISO_PARCIAL = (
+    "Quantitativo solicitado riscado: a diferença não será enviada depois. "
+    "Vale somente a quantidade entregue."
+)
+
+
 def linhas_comprovante(detalhes, status_atual, sem_custo=True):
-    via = "via operacional - sem valores" if sem_custo else "via gerencial - com custos"
+    via = "via operacional" if sem_custo else "via gerencial"
     linhas = [
         "SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS",
         f"Comprovante de Requisicao e Entrega - SisPAC ({via})",
@@ -509,6 +561,8 @@ def linhas_comprovante(detalhes, status_atual, sem_custo=True):
         f"Status: {status_atual}",
         "",
     ]
+    if pedido_tem_item_parcial(detalhes, status_atual):
+        linhas += [AVISO_PARCIAL, ""]
     if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
         obs = str(detalhes["observacao"].iloc[0]).strip()
         if obs:
@@ -525,7 +579,10 @@ def linhas_comprovante(detalhes, status_atual, sem_custo=True):
             linhas.append(f"Subtotal: {formatar_moeda_br(subtotal)}")
             linhas.append("Material | Solic. | Entregue | Vl. unitario | Custo")
         for _, linha in df_cat.iterrows():
-            base = f"{linha['material']} | {parse_numero(linha['quantidade'], True)} | {parse_numero(linha.get('quantidade_entregue'), True)}"
+            q_sol = parse_numero(linha["quantidade"], True)
+            if item_solicitado_nao_reenviado(linha, status_atual):
+                q_sol = f"{q_sol} (nao reenviado)"
+            base = f"{linha['material']} | {q_sol} | {parse_numero(linha.get('quantidade_entregue'), True)}"
             if not sem_custo:
                 base += f" | {formatar_moeda_br(linha.get('valor_unitario', 0))} | {formatar_moeda_br(linha.get('custo_total', 0))}"
             linhas.append(base)
@@ -559,13 +616,17 @@ def pdf_para_bytes(pdf):
     return str(saida).encode("latin-1")
 
 
-def pdf_celula(pdf, largura, altura, texto, negrito=False, alinhar="L"):
+def pdf_celula(pdf, largura, altura, texto, negrito=False, alinhar="L", riscado=False):
     pdf.set_font("Helvetica", "B" if negrito else "", 8)
     limite = max(largura - 2, 8)
     conteudo = texto_pdf(texto)
     while pdf.get_string_width(conteudo) > limite and len(conteudo) > 3:
         conteudo = conteudo[:-4] + "..."
+    x = pdf.get_x()
+    y = pdf.get_y()
     pdf.cell(largura, altura, conteudo, border=1, align=alinhar)
+    if riscado:
+        pdf.line(x + 1.5, y + (altura / 2), x + largura - 1.5, y + (altura / 2))
 
 
 def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
@@ -577,7 +638,7 @@ def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(0, 8, texto_pdf("SECRETARIA MUNICIPAL DE SAUDE DE PELOTAS"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.set_font("Helvetica", "B", 11)
-    via = "via operacional - sem valores" if sem_custo else "via gerencial - com custos"
+    via = "via operacional" if sem_custo else "via gerencial"
     pdf.cell(0, 7, texto_pdf(f"Comprovante de Requisicao e Entrega - SisPAC ({via})"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(3)
     pdf.set_font("Helvetica", "", 10)
@@ -590,6 +651,11 @@ def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
     ]
     for rotulo, valor in campos:
         pdf.cell(0, 6, texto_pdf(f"{rotulo}: {valor}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if pedido_tem_item_parcial(detalhes, status_atual):
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.multi_cell(0, 4, texto_pdf(AVISO_PARCIAL))
+        pdf.set_font("Helvetica", "", 10)
     if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
         obs = str(detalhes["observacao"].iloc[0]).strip()
         if obs:
@@ -629,8 +695,9 @@ def gerar_pdf_comprovante(detalhes, status_atual, sem_custo=True):
                     formatar_moeda_br(linha.get("valor_unitario", 0)),
                     formatar_moeda_br(linha.get("custo_total", 0)),
                 ])
-            for valor, largura in zip(valores, larguras):
-                pdf_celula(pdf, largura, 6, valor)
+            riscar_solicitado = item_solicitado_nao_reenviado(linha, status_atual)
+            for i_val, (valor, largura) in enumerate(zip(valores, larguras)):
+                pdf_celula(pdf, largura, 6, valor, riscado=(riscar_solicitado and i_val == 1))
             pdf.ln()
         pdf.ln(2)
     if not sem_custo:
@@ -822,7 +889,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
     obs = ""
     if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
         obs = str(detalhes["observacao"].iloc[0]).strip()
-    titulo_extra = " (via operacional — sem valores)" if sem_custo else " (via gerencial — com custos)"
+    titulo_extra = " (via operacional)" if sem_custo else " (via gerencial)"
     blocos = []
     custo_total = 0.0
     for cat in detalhes["categoria"].unique():
@@ -830,7 +897,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         if sem_custo:
             linhas = "".join(
                 f"<tr><td>{html_seguro(r['material'])}</td>"
-                f"<td>{parse_numero(r['quantidade'], True)}</td>"
+                f"<td>{html_qtd_solicitada(r, status_atual)}</td>"
                 f"<td>{parse_numero(r.get('quantidade_entregue'), True)}</td></tr>"
                 for _, r in df_cat.iterrows()
             )
@@ -844,7 +911,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
             custo_total += subtotal
             linhas = "".join(
                 f"<tr><td>{html_seguro(r['material'])}</td>"
-                f"<td>{parse_numero(r['quantidade'], True)}</td>"
+                f"<td>{html_qtd_solicitada(r, status_atual)}</td>"
                 f"<td>{parse_numero(r.get('quantidade_entregue'), True)}</td>"
                 f"<td>{formatar_moeda_br(r.get('valor_unitario', 0))}</td>"
                 f"<td>{formatar_moeda_br(r.get('custo_total', 0))}</td></tr>"
@@ -868,6 +935,11 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         f"<p style='margin-top:10px;padding:10px;border:1px solid #d35400;'>"
         f"<b>Observações:</b><br>{html_seguro(obs)}</p>" if obs else ""
     )
+    aviso_parcial = (
+        f"<p style='margin-top:10px;padding:10px;border:1px solid #922b21;background:#fdedec;'>"
+        f"<b>{html_seguro(AVISO_PARCIAL)}</b></p>"
+        if pedido_tem_item_parcial(detalhes, status_atual) else ""
+    )
     return f"""
     <div class="area-impressao" style="padding:8px;background:#fff;">
         <h3 style="text-align:center;margin:0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
@@ -877,6 +949,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         <p><b>Distrito:</b> {html_seguro(detalhes['distrito'].iloc[0])}</p>
         <p><b>Unidade (UBS):</b> {html_seguro(detalhes['ubs'].iloc[0])}</p>
         <p><b>Status:</b> {html_seguro(status_atual)}</p>
+        {aviso_parcial}
         {obs_html}
         {''.join(blocos)}
         {rodape_custo}
@@ -2012,13 +2085,18 @@ with aba2:
                                 obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
                                 if st.session_state.perfil == "GESTAO":
+                                    chave_via = f"modelo_imp_{pedido_selecionado}"
+                                    if st.session_state.get(chave_via) == "Sem valores (via operacional)":
+                                        st.session_state[chave_via] = "Via operacional"
+                                    elif st.session_state.get(chave_via) == "Com custos (via gerencial)":
+                                        st.session_state[chave_via] = "Via gerencial (com custos)"
                                     modelo_impressao = st.radio(
                                         "Modelo de impressão do pedido",
-                                        ["Sem valores (via operacional)", "Com custos (via gerencial)"],
+                                        ["Via operacional", "Via gerencial (com custos)"],
                                         horizontal=True,
                                         key=f"modelo_imp_{pedido_selecionado}",
                                     )
-                                    sem_custo_print = modelo_impressao.startswith("Sem valores")
+                                    sem_custo_print = "gerencial" not in modelo_impressao.lower()
                                 else:
                                     sem_custo_print = True
                                     st.caption("A via impressa desta unidade não inclui valores unitários nem custo total.")
@@ -2345,13 +2423,17 @@ with aba2:
                             df_rel_final = df_rel_final.sort_values(by="Qtd Solicitada", ascending=False).reset_index(drop=True)
 
                             if st.session_state.perfil == "GESTAO":
+                                if st.session_state.get("modelo_imp_oficial") == "Sem valores (via operacional)":
+                                    st.session_state.modelo_imp_oficial = "Via operacional"
+                                elif st.session_state.get("modelo_imp_oficial") == "Com custos (via gerencial)":
+                                    st.session_state.modelo_imp_oficial = "Via gerencial (com custos)"
                                 modelo_oficial = st.radio(
                                     "Modelo de impressão do relatório",
-                                    ["Sem valores (via operacional)", "Com custos (via gerencial)"],
+                                    ["Via operacional", "Via gerencial (com custos)"],
                                     horizontal=True,
                                     key="modelo_imp_oficial",
                                 )
-                                sem_custo_oficial = modelo_oficial.startswith("Sem valores")
+                                sem_custo_oficial = "gerencial" not in modelo_oficial.lower()
                             else:
                                 sem_custo_oficial = True
 
@@ -2370,7 +2452,7 @@ with aba2:
                                 None if sem_custo_oficial else custo_global_str,
                             )
                             escopo_texto = f"categoria <b>{html_seguro(cat_escolhida_imp)}</b>" if tipo_imp_oficial == "Por Categoria" else "escopo geral consolidado"
-                            via_txt = " (via operacional — sem valores)" if sem_custo_oficial else " (via gerencial — com custos)"
+                            via_txt = " (via operacional)" if sem_custo_oficial else " (via gerencial)"
                             extra_cabecalho = [
                                 f"Totais: {int(total_geral_pedidas)} un. solicitadas | {int(total_geral_entregues)} un. entregues"
                             ]
