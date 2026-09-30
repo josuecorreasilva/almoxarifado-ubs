@@ -5,6 +5,7 @@ import time
 import re
 import unicodedata
 from datetime import datetime, date
+from urllib.parse import quote
 from supabase import create_client, Client
 
 try:
@@ -180,51 +181,51 @@ st.markdown("""
         text-align: left !important;
         margin: 0.35rem 0 !important;
     }
+    .st-key-lista_pedidos [data-testid="stColumn"],
+    .st-key-lista_pedidos [data-testid="column"] {
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    .st-key-lista_pedidos [data-testid="stColumn"] > div,
+    .st-key-lista_pedidos [data-testid="column"] > div {
+        width: 100% !important;
+        align-items: stretch !important;
+        text-align: left !important;
+    }
     .st-key-lista_pedidos div.stButton > button {
         font-size: 0.8rem !important;
         padding: 0.25rem 0.45rem !important;
         min-height: 0 !important;
     }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] {
-        justify-content: flex-start !important;
-    }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child {
-        display: flex !important;
-        justify-content: flex-start !important;
-        text-align: left !important;
-    }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child .stButton {
+    .linha-pedido,
+    .linha-pedido-texto {
+        display: block !important;
         width: 100% !important;
-        display: flex !important;
-        justify-content: flex-start !important;
         text-align: left !important;
+        text-decoration: none !important;
+        color: #1c2833 !important;
+        padding: 8px 2px !important;
+        border-bottom: 1px solid #d5d8dc;
+        font-size: 0.92rem;
+        line-height: 1.35;
     }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button {
-        width: 100% !important;
-        justify-content: flex-start !important;
-        text-align: left !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: inherit !important;
-        font-size: 0.92rem !important;
-        font-weight: 500 !important;
-        padding: 0.35rem 0.15rem !important;
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-    }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button p,
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"],
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"] p {
-        text-align: left !important;
-        justify-content: flex-start !important;
-        width: 100% !important;
-        margin: 0 !important;
-    }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button:hover {
-        background: #eaf2f8 !important;
+    .linha-pedido-texto:hover {
+        background: #eaf2f8;
         color: #1a5276 !important;
+    }
+    .linha-pedido .ped-num,
+    .linha-pedido-texto .ped-num {
+        font-weight: 700;
+        margin-right: 12px;
+    }
+    .linha-pedido .ped-ubs,
+    .linha-pedido-texto .ped-ubs {
+        margin-right: 12px;
+    }
+    .linha-pedido .ped-meta,
+    .linha-pedido-texto .ped-meta {
+        color: #5d6d6e;
     }
     .area-impressao s {
         text-decoration: line-through;
@@ -361,6 +362,42 @@ def abrir_pedido_lista(numero, modo, imprimir=False):
     st.rerun()
 
 
+def consumir_link_pedido():
+    try:
+        numero = st.query_params.get("sispac_pedido")
+    except Exception:
+        return
+    if isinstance(numero, (list, tuple)):
+        numero = numero[0] if numero else None
+    if not numero:
+        return
+    modo = st.query_params.get("sispac_modo") or "visualizar"
+    if isinstance(modo, (list, tuple)):
+        modo = modo[0] if modo else "visualizar"
+    st.session_state.pedido_aberto = str(numero).strip()
+    st.session_state.modo_abertura = str(modo)
+    st.session_state.imprimir_ao_abrir = False
+    try:
+        del st.query_params["sispac_pedido"]
+        del st.query_params["sispac_modo"]
+    except Exception:
+        pass
+    st.rerun()
+
+
+def html_linha_pedido(numero, ubs, status, data_txt, href=None):
+    corpo = (
+        f"<span class='ped-num'>{html_seguro(numero)}</span>"
+        f"<span class='ped-ubs'>{html_seguro(ubs)}</span>"
+        f"<span class='ped-meta'>{html_seguro(status)} · {html_seguro(data_txt)}</span>"
+    )
+    if href:
+        return (
+            f"<a class='linha-pedido-texto' href='{href}' target='_self'>{corpo}</a>"
+        )
+    return f"<div class='linha-pedido'>{corpo}</div>"
+
+
 def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
     if df_lista is None or df_lista.empty:
         st.info("Nenhum pedido encontrado.")
@@ -372,27 +409,20 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
             data_txt = str(row.get("data") or "")
             if len(data_txt) > 16:
                 data_txt = data_txt[:16]
-            rotulo = (
-                f"{numero}  {row.get('ubs', '')}  "
-                f"{row.get('status', '')} · {data_txt}"
-            )
+            ubs = str(row.get("ubs") or "")
+            status = str(row.get("status") or "")
             pode_abrir_texto = acao != "conferir" or st.session_state.perfil == "GESTAO"
             if acao == "conferir":
-                c_txt, c_acao = st.columns([7.2, 1.2], vertical_alignment="center")
+                c_txt, c_acao = st.columns([8.5, 1.5])
             else:
-                c_txt, c_ver, c_imp = st.columns([6.4, 1.05, 0.95], vertical_alignment="center")
+                c_txt, c_ver, c_imp = st.columns([7.4, 1.3, 1.3])
             with c_txt:
                 if pode_abrir_texto:
-                    if st.button(rotulo, key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
-                        abrir_pedido_lista(numero, "conferir" if acao == "conferir" else "visualizar")
+                    modo_link = "conferir" if acao == "conferir" else "visualizar"
+                    href = f"?sispac_pedido={quote(numero, safe='')}&sispac_modo={modo_link}"
+                    st.markdown(html_linha_pedido(numero, ubs, status, data_txt, href), unsafe_allow_html=True)
                 else:
-                    st.markdown(
-                        "<p style='text-align:left;margin:0.35rem 0;font-size:0.92rem;'>"
-                        f"<b>{html_seguro(numero)}</b>&nbsp;&nbsp;{html_seguro(row.get('ubs', ''))}"
-                        f"&nbsp;&nbsp;<span style='color:#5d6d6e'>{html_seguro(row.get('status', ''))} · {html_seguro(data_txt)}</span>"
-                        "</p>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown(html_linha_pedido(numero, ubs, status, data_txt), unsafe_allow_html=True)
             if acao == "conferir":
                 with c_acao:
                     if st.session_state.perfil == "GESTAO":
@@ -1795,6 +1825,7 @@ with aba2:
                     st.markdown("---")
                     
                     if modo_aba2 == "Pedidos e conferência":
+                        consumir_link_pedido()
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
