@@ -383,8 +383,6 @@ def resolver_pedido_aberto(pedidos_unicos, so_pendentes, perfil):
         return "Selecione..."
     if not so_pendentes and not pedido_concluido(status):
         return "Selecione..."
-    if so_pendentes and perfil != "GESTAO":
-        return "Selecione..."
     return pedido
 
 
@@ -2129,7 +2127,7 @@ with aba2:
                                 filtro_ubs = "Todas"
                                 agrupamento = "Por pedido"
                                 if so_pendentes:
-                                    st.caption("Pedidos enviados aguardam conferência do almoxarifado. Visualizar e imprimir ficam na lista de concluídos.")
+                                    st.caption("Clique no pedido para conferir o que a unidade enviou. Não é possível alterar. O almoxarifado faz a conferência de entrega.")
     
                             df_lista = pedidos_unicos.copy()
                             if filtro_status == "Concluídos":
@@ -2240,18 +2238,18 @@ with aba2:
                                 if busca_pedido.strip() and (df_lista is None or df_lista.empty):
                                     st.warning("Nenhum pedido com esse número.")
                                 else:
-                                    if (
-                                        busca_pedido.strip()
-                                        and len(df_lista) == 1
-                                        and not (so_pendentes and st.session_state.perfil != "GESTAO")
-                                    ):
+                                    if busca_pedido.strip() and len(df_lista) == 1:
                                         st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
-                                        st.session_state.modo_abertura = "conferir" if so_pendentes else "visualizar"
+                                        st.session_state.modo_abertura = (
+                                            "conferir"
+                                            if so_pendentes and st.session_state.perfil == "GESTAO"
+                                            else "visualizar"
+                                        )
                                         st.rerun()
                                     render_lista_pedidos_clicavel(
                                         df_lista,
                                         "acomp",
-                                        acao="conferir" if so_pendentes else "visualizar",
+                                        acao="conferir" if so_pendentes and st.session_state.perfil == "GESTAO" else "visualizar",
                                     )
 
                         if pedido_selecionado != "Selecione...":
@@ -2262,8 +2260,13 @@ with aba2:
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = status_consolidado_pedido(detalhes)
                             modo_abertura = st.session_state.get("modo_abertura") or (
-                                "conferir" if so_pendentes else "visualizar"
+                                "conferir"
+                                if so_pendentes and st.session_state.perfil == "GESTAO"
+                                else "visualizar"
                             )
+
+                            if st.session_state.perfil != "GESTAO" and not pedido_concluido(status_atual):
+                                st.info("Pedido aguardando o almoxarifado. A unidade só consulta — não é possível alterar quantidades.")
 
                             # Conferência só na lista de pendentes
                             if (
