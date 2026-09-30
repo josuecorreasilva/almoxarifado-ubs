@@ -176,20 +176,14 @@ st.markdown("""
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] {
         min-height: 1.3rem !important;
     }
-    .st-key-lista_pedidos div.stButton > button {
+    .st-key-lista_pedidos p {
         text-align: left !important;
-        justify-content: flex-start !important;
-        font-size: 0.8rem !important;
-        font-weight: 500 !important;
-        padding: 0.28rem 0.55rem !important;
-        min-height: 0 !important;
-        border: 1px solid #d5e4e6 !important;
-        background: #f7fafb !important;
-        color: #1a3338 !important;
+        margin: 0.35rem 0 !important;
     }
-    .st-key-lista_pedidos div.stButton > button:hover {
-        border-color: #0e4d56 !important;
-        background: #eef6f7 !important;
+    .st-key-lista_pedidos div.stButton > button {
+        font-size: 0.8rem !important;
+        padding: 0.25rem 0.45rem !important;
+        min-height: 0 !important;
     }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
@@ -293,14 +287,30 @@ def render_lista_pedidos_clicavel(df_lista, chave):
         st.info("Nenhum pedido encontrado.")
         return
     df_lista = df_lista.reset_index(drop=True)
-    col_lista, _ = st.columns([0.5, 1.5])
-    with col_lista:
-        with st.container(key="lista_pedidos"):
-            for i, row in df_lista.iterrows():
-                numero = str(row["numero_pedido"])
-                rotulo = f"{numero}  ·  {row.get('ubs', '')}"
-                if st.button(rotulo, key=f"{chave}_{i}_{numero}", use_container_width=True):
+    with st.container(key="lista_pedidos"):
+        for i, row in df_lista.iterrows():
+            numero = str(row["numero_pedido"])
+            data_txt = str(row.get("data") or "")
+            if len(data_txt) > 16:
+                data_txt = data_txt[:16]
+            c_txt, c_ver, c_imp = st.columns([6.4, 1.05, 0.95], vertical_alignment="center")
+            with c_txt:
+                st.markdown(
+                    "<p style='text-align:left;margin:0.35rem 0;font-size:0.92rem;'>"
+                    f"<b>{html_seguro(numero)}</b>&nbsp;&nbsp;{html_seguro(row.get('ubs', ''))}"
+                    f"&nbsp;&nbsp;<span style='color:#5d6d6e'>{html_seguro(row.get('status', ''))} · {html_seguro(data_txt)}</span>"
+                    "</p>",
+                    unsafe_allow_html=True,
+                )
+            with c_ver:
+                if st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}"):
                     st.session_state.pedido_aberto = numero
+                    st.session_state.imprimir_ao_abrir = False
+                    st.rerun()
+            with c_imp:
+                if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
+                    st.session_state.pedido_aberto = numero
+                    st.session_state.imprimir_ao_abrir = True
                     st.rerun()
 
 
@@ -1931,6 +1941,9 @@ with aba2:
 
                             html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
                             st.markdown(html_pedido, unsafe_allow_html=True)
+                            if st.session_state.get("imprimir_ao_abrir"):
+                                st.session_state.imprimir_ao_abrir = False
+                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                             sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
                             nome_pdf = aplicar_sufixo_arquivo(
