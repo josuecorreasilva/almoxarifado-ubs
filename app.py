@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import time
 import re
+import textwrap
 import unicodedata
 from datetime import datetime, date
 from supabase import create_client, Client
@@ -874,20 +875,20 @@ def adicionar_linha_total_relatorio(df, qtd_solicitada, qtd_entregue, custo_str=
 
 
 def html_bloco_assinaturas(esquerda_titulo, esquerda_legenda, direita_titulo, direita_legenda):
-    return f"""
+    return textwrap.dedent(f"""\
     <div class="bloco-assinaturas">
-        <div class="campo-assinatura">
-            <div class="linha"></div>
-            <p>{html_seguro(esquerda_titulo)}</p>
-            <span>{html_seguro(esquerda_legenda)}</span>
-        </div>
-        <div class="campo-assinatura">
-            <div class="linha"></div>
-            <p>{html_seguro(direita_titulo)}</p>
-            <span>{html_seguro(direita_legenda)}</span>
-        </div>
+    <div class="campo-assinatura">
+    <div class="linha"></div>
+    <p>{html_seguro(esquerda_titulo)}</p>
+    <span>{html_seguro(esquerda_legenda)}</span>
     </div>
-    """
+    <div class="campo-assinatura">
+    <div class="linha"></div>
+    <p>{html_seguro(direita_titulo)}</p>
+    <span>{html_seguro(direita_legenda)}</span>
+    </div>
+    </div>
+    """).strip()
 
 
 def pdf_bloco_assinaturas(pdf, esquerda_titulo, esquerda_legenda, direita_titulo=None, direita_legenda=None):
@@ -985,27 +986,26 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
         f"<b>{html_seguro(AVISO_PARCIAL)}</b></p>"
         if pedido_tem_item_parcial(detalhes, status_atual) else ""
     )
-    return f"""
+    meio = "".join(parte for parte in (aviso_parcial, obs_html, "".join(blocos), rodape_custo) if parte)
+    assinaturas = html_bloco_assinaturas(
+        "Almoxarifado Central",
+        "Assinatura e carimbo",
+        "Recebimento na UBS",
+        "Assinatura do responsável",
+    )
+    return textwrap.dedent(f"""\
     <div class="area-impressao" style="padding:8px;background:#fff;">
-        <h3 style="text-align:center;margin:0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
-        <h4 style="text-align:center;color:#555;margin:6px 0 16px 0;">Comprovante de Requisição e Entrega — SisPAC{titulo_extra}</h4>
-        <p><b>Nº do Pedido:</b> {html_seguro(detalhes['numero_pedido'].iloc[0] if 'numero_pedido' in detalhes.columns else '')}</p>
-        <p><b>Data/Hora do envio:</b> {html_seguro(detalhes['data'].iloc[0])}</p>
-        <p><b>Distrito:</b> {html_seguro(detalhes['distrito'].iloc[0])}</p>
-        <p><b>Unidade (UBS):</b> {html_seguro(detalhes['ubs'].iloc[0])}</p>
-        <p><b>Status:</b> {html_seguro(status_atual)}</p>
-        {aviso_parcial}
-        {obs_html}
-        {''.join(blocos)}
-        {rodape_custo}
-        {html_bloco_assinaturas(
-            "Almoxarifado Central",
-            "Assinatura e carimbo",
-            "Recebimento na UBS",
-            "Assinatura do responsável",
-        )}
+    <h3 style="text-align:center;margin:0;">SECRETARIA MUNICIPAL DE SAÚDE DE PELOTAS</h3>
+    <h4 style="text-align:center;color:#555;margin:6px 0 16px 0;">Comprovante de Requisição e Entrega — SisPAC{titulo_extra}</h4>
+    <p><b>Nº do Pedido:</b> {html_seguro(detalhes['numero_pedido'].iloc[0] if 'numero_pedido' in detalhes.columns else '')}</p>
+    <p><b>Data/Hora do envio:</b> {html_seguro(detalhes['data'].iloc[0])}</p>
+    <p><b>Distrito:</b> {html_seguro(detalhes['distrito'].iloc[0])}</p>
+    <p><b>Unidade (UBS):</b> {html_seguro(detalhes['ubs'].iloc[0])}</p>
+    <p><b>Status:</b> {html_seguro(status_atual)}</p>
+    {meio}
+    {assinaturas}
     </div>
-    """
+    """).strip()
 
 
 def mapa_saidas_conferidas():
@@ -2147,7 +2147,7 @@ with aba2:
                                     st.caption("A via impressa desta unidade não inclui valores unitários nem custo total.")
 
                                 html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
-                                st.markdown(html_pedido, unsafe_allow_html=True)
+                                st.markdown(textwrap.dedent(html_pedido).strip(), unsafe_allow_html=True)
                                 if st.session_state.get("imprimir_ao_abrir"):
                                     st.session_state.imprimir_ao_abrir = False
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
@@ -2550,7 +2550,7 @@ with aba2:
                                 )}
                             </div>
                             """
-                            st.markdown(html_relatorio, unsafe_allow_html=True)
+                            st.markdown(textwrap.dedent(html_relatorio).strip(), unsafe_allow_html=True)
                             st.caption(f"Nome do arquivo: `{nome_rel}`")
                             pdf_rel = gerar_pdf_relatorio(
                                 df_print,
