@@ -1738,7 +1738,10 @@ else:
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
 with aba1:
     st.markdown("#### Requisição de materiais")
-    st.caption("Preencha a unidade, escolha categoria e material e inclua os itens antes de enviar a requisição.")
+    if st.session_state.perfil == "GESTAO":
+        st.caption("Selecione o distrito e a unidade, escolha a categoria e o material e inclua os itens antes de enviar a requisição.")
+    else:
+        st.caption("Escolha a categoria e o material e inclua os itens no pedido antes de enviar a requisição.")
     
     col_distrito, col_ubs = st.columns(2)
     placeholder_dist = "Selecione o distrito"
