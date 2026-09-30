@@ -5,7 +5,6 @@ import time
 import re
 import unicodedata
 from datetime import datetime, date
-from urllib.parse import quote
 from supabase import create_client, Client
 
 try:
@@ -198,6 +197,30 @@ st.markdown("""
         padding: 0.25rem 0.45rem !important;
         min-height: 0 !important;
     }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button {
+        width: 100% !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #1c2833 !important;
+        font-size: 0.92rem !important;
+        font-weight: 500 !important;
+        padding: 8px 2px !important;
+        border-bottom: 1px solid #d5d8dc !important;
+        border-radius: 0 !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button p,
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"] p {
+        text-align: left !important;
+        width: 100% !important;
+        margin: 0 !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button:hover {
+        background: #eaf2f8 !important;
+        color: #1a5276 !important;
+    }
     .linha-pedido,
     .linha-pedido-texto {
         display: block !important;
@@ -362,40 +385,14 @@ def abrir_pedido_lista(numero, modo, imprimir=False):
     st.rerun()
 
 
-def consumir_link_pedido():
-    try:
-        numero = st.query_params.get("sispac_pedido")
-    except Exception:
-        return
-    if isinstance(numero, (list, tuple)):
-        numero = numero[0] if numero else None
-    if not numero:
-        return
-    modo = st.query_params.get("sispac_modo") or "visualizar"
-    if isinstance(modo, (list, tuple)):
-        modo = modo[0] if modo else "visualizar"
-    st.session_state.pedido_aberto = str(numero).strip()
-    st.session_state.modo_abertura = str(modo)
-    st.session_state.imprimir_ao_abrir = False
-    try:
-        del st.query_params["sispac_pedido"]
-        del st.query_params["sispac_modo"]
-    except Exception:
-        pass
-    st.rerun()
-
-
-def html_linha_pedido(numero, ubs, status, data_txt, href=None):
-    corpo = (
+def html_linha_pedido(numero, ubs, status, data_txt):
+    return (
+        "<div class='linha-pedido'>"
         f"<span class='ped-num'>{html_seguro(numero)}</span>"
         f"<span class='ped-ubs'>{html_seguro(ubs)}</span>"
         f"<span class='ped-meta'>{html_seguro(status)} · {html_seguro(data_txt)}</span>"
+        "</div>"
     )
-    if href:
-        return (
-            f"<a class='linha-pedido-texto' href='{href}' target='_self'>{corpo}</a>"
-        )
-    return f"<div class='linha-pedido'>{corpo}</div>"
 
 
 def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
@@ -411,6 +408,7 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                 data_txt = data_txt[:16]
             ubs = str(row.get("ubs") or "")
             status = str(row.get("status") or "")
+            rotulo = f"{numero}  {ubs}  {status} · {data_txt}"
             pode_abrir_texto = acao != "conferir" or st.session_state.perfil == "GESTAO"
             if acao == "conferir":
                 c_txt, c_acao = st.columns([8.5, 1.5])
@@ -418,9 +416,8 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                 c_txt, c_ver, c_imp = st.columns([7.4, 1.3, 1.3])
             with c_txt:
                 if pode_abrir_texto:
-                    modo_link = "conferir" if acao == "conferir" else "visualizar"
-                    href = f"?sispac_pedido={quote(numero, safe='')}&sispac_modo={modo_link}"
-                    st.markdown(html_linha_pedido(numero, ubs, status, data_txt, href), unsafe_allow_html=True)
+                    if st.button(rotulo, key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
+                        abrir_pedido_lista(numero, "conferir" if acao == "conferir" else "visualizar")
                 else:
                     st.markdown(html_linha_pedido(numero, ubs, status, data_txt), unsafe_allow_html=True)
             if acao == "conferir":
@@ -1825,7 +1822,6 @@ with aba2:
                     st.markdown("---")
                     
                     if modo_aba2 == "Pedidos e conferência":
-                        consumir_link_pedido()
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
