@@ -192,63 +192,72 @@ st.markdown("""
         align-items: stretch !important;
         text-align: left !important;
     }
+    .st-key-lista_pedidos [data-testid="stMarkdown"],
+    .st-key-lista_pedidos [data-testid="stMarkdownContainer"],
+    .st-key-lista_pedidos [data-testid="stElementContainer"] {
+        width: 100% !important;
+        text-align: left !important;
+        display: block !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child {
+        position: relative !important;
+        text-align: left !important;
+    }
     .st-key-lista_pedidos div.stButton > button {
         font-size: 0.8rem !important;
         padding: 0.25rem 0.45rem !important;
         min-height: 0 !important;
     }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button {
+    [class*="st-key-hit_"] {
+        position: absolute !important;
+        left: 0 !important;
+        right: 0 !important;
+        top: 0 !important;
+        height: 44px !important;
+        z-index: 6 !important;
+    }
+    [class*="st-key-hit_"] div.stButton > button {
         width: 100% !important;
-        justify-content: flex-start !important;
-        text-align: left !important;
-        background: transparent !important;
+        height: 44px !important;
+        opacity: 0 !important;
+        cursor: pointer !important;
         border: none !important;
-        box-shadow: none !important;
-        color: #1c2833 !important;
-        font-size: 0.92rem !important;
-        font-weight: 500 !important;
-        padding: 8px 2px !important;
-        border-bottom: 1px solid #d5d8dc !important;
-        border-radius: 0 !important;
+        background: transparent !important;
     }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button p,
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button [data-testid="stMarkdownContainer"] p {
-        text-align: left !important;
+    .linha-pedido {
+        display: flex !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
         width: 100% !important;
-        margin: 0 !important;
-    }
-    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child div.stButton > button:hover {
-        background: #eaf2f8 !important;
-        color: #1a5276 !important;
-    }
-    .linha-pedido,
-    .linha-pedido-texto {
-        display: block !important;
-        width: 100% !important;
+        max-width: 100% !important;
         text-align: left !important;
-        text-decoration: none !important;
-        color: #1c2833 !important;
-        padding: 8px 2px !important;
+        gap: 16px;
+        padding: 10px 8px !important;
         border-bottom: 1px solid #d5d8dc;
+        box-sizing: border-box;
         font-size: 0.92rem;
         line-height: 1.35;
+        color: #1c2833;
     }
-    .linha-pedido-texto:hover {
-        background: #eaf2f8;
-        color: #1a5276 !important;
-    }
-    .linha-pedido .ped-num,
-    .linha-pedido-texto .ped-num {
+    .linha-pedido-cab {
         font-weight: 700;
-        margin-right: 12px;
+        color: #2c3e50;
+        background: #f4f6f7;
+        border-bottom: 1px solid #bdc3c7;
     }
-    .linha-pedido .ped-ubs,
-    .linha-pedido-texto .ped-ubs {
-        margin-right: 12px;
+    .linha-pedido .ped-num {
+        flex: 0 0 210px;
+        font-weight: 700;
+        text-align: left !important;
     }
-    .linha-pedido .ped-meta,
-    .linha-pedido-texto .ped-meta {
+    .linha-pedido .ped-ubs {
+        flex: 0 0 170px;
+        text-align: left !important;
+    }
+    .linha-pedido .ped-meta {
+        flex: 1 1 auto;
         color: #5d6d6e;
+        text-align: left !important;
     }
     .area-impressao s {
         text-decoration: line-through;
@@ -401,6 +410,16 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
         return
     df_lista = df_lista.reset_index(drop=True)
     with st.container(key="lista_pedidos"):
+        cab, _espaco_cab = st.columns([8.5, 1.5]) if acao == "conferir" else st.columns([7.4, 2.6])
+        with cab:
+            st.markdown(
+                "<div class='linha-pedido linha-pedido-cab'>"
+                "<span class='ped-num'>Pedido</span>"
+                "<span class='ped-ubs'>UBS</span>"
+                "<span class='ped-meta'>Situação</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
         for i, row in df_lista.iterrows():
             numero = str(row["numero_pedido"])
             data_txt = str(row.get("data") or "")
@@ -408,18 +427,17 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                 data_txt = data_txt[:16]
             ubs = str(row.get("ubs") or "")
             status = str(row.get("status") or "")
-            rotulo = f"{numero}  {ubs}  {status} · {data_txt}"
             pode_abrir_texto = acao != "conferir" or st.session_state.perfil == "GESTAO"
             if acao == "conferir":
                 c_txt, c_acao = st.columns([8.5, 1.5])
             else:
                 c_txt, c_ver, c_imp = st.columns([7.4, 1.3, 1.3])
             with c_txt:
+                st.markdown(html_linha_pedido(numero, ubs, status, data_txt), unsafe_allow_html=True)
                 if pode_abrir_texto:
-                    if st.button(rotulo, key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
-                        abrir_pedido_lista(numero, "conferir" if acao == "conferir" else "visualizar")
-                else:
-                    st.markdown(html_linha_pedido(numero, ubs, status, data_txt), unsafe_allow_html=True)
+                    with st.container(key=f"hit_{chave}_{i}"):
+                        if st.button("Abrir pedido", key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
+                            abrir_pedido_lista(numero, "conferir" if acao == "conferir" else "visualizar")
             if acao == "conferir":
                 with c_acao:
                     if st.session_state.perfil == "GESTAO":
