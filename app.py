@@ -2582,32 +2582,47 @@ if aba3 is not None:
         st.markdown("#### Cadastro, lotes e histórico")
         st.caption("Itens do banco somam-se à planilha. Entrada de lote baixa FIFO na conferência, com trava se duas pessoas salvarem ao mesmo tempo.")
         usuario_atual = st.session_state.get("email_usuario")
+        df_cat_banco = carregar_materiais_banco()
+        categorias_cadastro = set()
+        if col_categoria and df_materiais is not None and not df_materiais.empty:
+            for c in df_materiais[col_categoria].dropna():
+                nome_cat = str(c).strip()
+                if nome_cat and nome_cat not in MATERIAIS_INVALIDOS:
+                    categorias_cadastro.add(nome_cat)
+        if df_cat_banco is not None and not df_cat_banco.empty and "categoria" in df_cat_banco.columns:
+            for c in df_cat_banco["categoria"].dropna():
+                nome_cat = str(c).strip()
+                if nome_cat and nome_cat not in MATERIAIS_INVALIDOS:
+                    categorias_cadastro.add(nome_cat)
+        opcoes_cat_cadastro = sorted(categorias_cadastro, key=lambda x: x.casefold())
 
         col_cat, col_est = st.columns(2)
         with col_cat:
             st.markdown("##### Novo material")
-            with st.form("form_cadastro_material"):
-                cat_novo = st.text_input("Categoria")
-                mat_novo = st.text_input("Nome do material")
-                preco_novo = st.number_input("Valor unitário (R$)", min_value=0.0, value=0.0, format="%.2f")
-                if st.form_submit_button("Cadastrar material"):
-                    if not cat_novo.strip() or not mat_novo.strip():
-                        st.error("Informe categoria e material.")
-                    else:
-                        try:
-                            supabase.table("materiais").insert({
-                                "categoria": cat_novo.strip(),
-                                "material": mat_novo.strip(),
-                                "valor_unitario": float(preco_novo),
-                                "criado_por": usuario_atual,
-                            }).execute()
-                            registrar_auditoria("CADASTRO_MATERIAL", "materiais", f"{cat_novo.strip()} / {mat_novo.strip()}")
-                            st.success("Material cadastrado. Ele já pode aparecer no pedido.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Não foi possível cadastrar. Rode o SQL do SisPAC no Supabase se a tabela ainda não existir. ({e})")
+            if not opcoes_cat_cadastro:
+                st.warning("Nenhuma categoria encontrada no catálogo. Inclua categorias na planilha para cadastrar materiais.")
+            else:
+                with st.form("form_cadastro_material"):
+                    cat_novo = st.selectbox("Categoria", opcoes_cat_cadastro, key="cad_sel_categoria")
+                    mat_novo = st.text_input("Nome do material")
+                    preco_novo = st.number_input("Valor unitário (R$)", min_value=0.0, value=0.0, format="%.2f")
+                    if st.form_submit_button("Cadastrar material"):
+                        if not str(cat_novo).strip() or not mat_novo.strip():
+                            st.error("Informe categoria e material.")
+                        else:
+                            try:
+                                supabase.table("materiais").insert({
+                                    "categoria": str(cat_novo).strip(),
+                                    "material": mat_novo.strip(),
+                                    "valor_unitario": float(preco_novo),
+                                    "criado_por": usuario_atual,
+                                }).execute()
+                                registrar_auditoria("CADASTRO_MATERIAL", "materiais", f"{str(cat_novo).strip()} / {mat_novo.strip()}")
+                                st.success("Material cadastrado. Ele já pode aparecer no pedido.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Não foi possível cadastrar. Rode o SQL do SisPAC no Supabase se a tabela ainda não existir. ({e})")
 
-            df_cat_banco = carregar_materiais_banco()
             if df_cat_banco.empty:
                 st.info("Ainda não há materiais só no banco. A planilha continua valendo.")
             else:
@@ -2615,17 +2630,38 @@ if aba3 is not None:
 
         with col_est:
             st.markdown("##### Entrada de lote")
+            cat_lote = st.selectbox(
+                "Categoria",
+                ["Selecione a categoria"] + opcoes_cat_cadastro,
+                key="lote_sel_categoria",
+            )
             nomes_catalogo = []
-            if not df_materiais.empty and col_material:
-                nomes_catalogo = sorted({str(x).strip() for x in df_materiais[col_material].dropna() if str(x).strip() not in MATERIAIS_INVALIDOS})
+            if (
+                cat_lote not in MATERIAIS_INVALIDOS
+                and col_material
+                and df_materiais is not None
+                and not df_materiais.empty
+            ):
+                if col_categoria:
+                    df_lote_cat = df_materiais[df_materiais[col_categoria].astype(str).str.strip() == str(cat_lote).strip()]
+                else:
+                    df_lote_cat = df_materiais
+                nomes_catalogo = sorted({
+                    str(x).strip()
+                    for x in df_lote_cat[col_material].dropna()
+                    if str(x).strip() not in MATERIAIS_INVALIDOS
+                })
             with st.form("form_entrada_lote"):
-                material_lote = st.selectbox("Material", nomes_catalogo if nomes_catalogo else ["Nenhum item"])
+                material_lote = st.selectbox(
+                    "Material",
+                    nomes_catalogo if nomes_catalogo else ["Selecione a categoria primeiro"],
+                )
                 lote_input = st.text_input("Lote")
                 validade_input = st.date_input("Validade", value=date.today())
                 qtd_entrada = st.number_input("Quantidade", min_value=1, value=1)
                 fornecedor_input = st.text_input("Fornecedor (opcional)")
                 if st.form_submit_button("Registrar entrada"):
-                    if material_lote in MATERIAIS_INVALIDOS or material_lote == "Nenhum item" or not lote_input.strip():
+                    if material_lote in MATERIAIS_INVALIDOS or material_lote == "Selecione a categoria primeiro" or not lote_input.strip():
                         st.error("Informe material e lote.")
                     else:
                         try:
