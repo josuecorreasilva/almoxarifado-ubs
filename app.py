@@ -1314,12 +1314,37 @@ with aba1:
     st.caption("Preencha a unidade, escolha categoria e material e inclua os itens antes de enviar a requisição.")
     
     col_distrito, col_ubs = st.columns(2)
+    placeholder_dist = "Selecione o distrito"
+    placeholder_ubs = "Selecione a unidade"
     
     if st.session_state.perfil == "GESTAO":
         with col_distrito:
-            distrito_selecionado = st.selectbox("Selecione o Distrito", list(distritos_ubs.keys()))
+            distrito_selecionado = st.selectbox(
+                "Distrito",
+                [placeholder_dist] + list(distritos_ubs.keys()),
+                index=0,
+                key="sel_distrito_pedido",
+            )
         with col_ubs:
-            ubs_selecionada = st.selectbox("Selecione a Unidade", distritos_ubs[distrito_selecionado])
+            if distrito_selecionado == placeholder_dist:
+                ubs_selecionada = st.selectbox(
+                    "Unidade",
+                    [placeholder_ubs],
+                    index=0,
+                    disabled=True,
+                    key="sel_ubs_pedido_vazio",
+                )
+            else:
+                ubs_selecionada = st.selectbox(
+                    "Unidade",
+                    [placeholder_ubs] + distritos_ubs[distrito_selecionado],
+                    index=0,
+                    key="sel_ubs_pedido",
+                )
+        unidade_ok = (
+            distrito_selecionado != placeholder_dist
+            and ubs_selecionada != placeholder_ubs
+        )
     else:
         unidade_usuario = st.session_state.ubs_nome
         distrito_detectado = st.session_state.get("distrito_ubs") or "Não Encontrado"
@@ -1328,11 +1353,15 @@ with aba1:
                 if unidade_usuario in unidades:
                     distrito_detectado = distrito
                     break
-                
+        distrito_selecionado = distrito_detectado
+        ubs_selecionada = unidade_usuario
+        unidade_ok = True
         with col_distrito:
-            distrito_selecionado = st.selectbox("Distrito (Acesso Restrito)", [distrito_detectado], disabled=True)
+            st.markdown("**Distrito**")
+            st.write(distrito_selecionado)
         with col_ubs:
-            ubs_selecionada = st.selectbox("Unidade (Acesso Restrito)", [unidade_usuario], disabled=True)
+            st.markdown("**Unidade**")
+            st.write(ubs_selecionada)
             
     st.markdown("---")
 
@@ -1371,7 +1400,9 @@ with aba1:
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
 
-    if (
+    if not unidade_ok:
+        st.info("Selecione o distrito e a unidade antes de montar o pedido.")
+    elif (
         not df_materiais.empty
         and col_categoria
         and col_material
@@ -1436,7 +1467,8 @@ with aba1:
                         st.success(f"{len(marcados)} item(ns) incluído(s) na requisição.")
                         st.rerun()
     else:
-        st.caption("Selecione a categoria para ver o catálogo e marcar os itens.")
+        if unidade_ok:
+            st.caption("Selecione a categoria para ver o catálogo e marcar os itens.")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
@@ -1479,7 +1511,9 @@ with aba1:
     )
 
     if st.button("Enviar requisição", type="primary", key="btn_enviar_pedido"):
-        if not st.session_state.carrinho:
+        if not unidade_ok:
+            st.warning("Selecione o distrito e a unidade antes de enviar.")
+        elif not st.session_state.carrinho:
             st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
         elif not supabase:
             st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
@@ -1520,7 +1554,7 @@ with aba2:
     if st.session_state.perfil == "GESTAO":
         st.markdown(
             "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila de chegada, conferência de entregas, centro de custos e relatórios oficiais.</p></div>",
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Operação da fila e conferência. Relatórios (analítico, oficial e custos) ficam em um só menu.</p></div>",
             unsafe_allow_html=True,
         )
     else:
@@ -1564,25 +1598,27 @@ with aba2:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
                     if st.session_state.perfil == "GESTAO":
-                        opcoes_visao = [
-                            "📥 Fila de Chegada (ordem de entrada)",
-                            "📋 Acompanhar Pedidos, Conferência e Comprovantes",
-                            "💰 Centro de Custos e Orçamento (Efetivo)",
-                            "📈 Relatórios Analíticos e Gráficos",
-                            "🖨️ Emitir Relatório Oficial (Imprimir)",
-                        ]
                         modo_aba2 = st.radio(
-                            "Escolha a visualização:",
-                            opcoes_visao,
+                            "Área",
+                            ["Fila de chegada", "Pedidos e conferência", "Relatórios"],
                             horizontal=True,
-                            key="radio_modo_aba2",
+                            key="radio_area_painel",
                         )
+                        sub_relatorio = None
+                        if modo_aba2 == "Relatórios":
+                            sub_relatorio = st.radio(
+                                "Tipo de relatório",
+                                ["Analítico e gráficos", "Relatório oficial", "Centro de custos"],
+                                horizontal=True,
+                                key="sub_relatorio_gestao",
+                            )
                     else:
-                        modo_aba2 = "📋 Acompanhar Pedidos, Conferência e Comprovantes"
+                        modo_aba2 = "Pedidos e conferência"
+                        sub_relatorio = None
                     
                     st.markdown("---")
                     
-                    if modo_aba2 in ("📥 Fila de Chegada (ordem de entrada)", "📋 Acompanhar Pedidos, Conferência e Comprovantes"):
+                    if modo_aba2 in ("Fila de chegada", "Pedidos e conferência"):
                         if 'status' not in df_supabase.columns:
                             df_supabase['status'] = 'Pedido enviado'
 
@@ -1600,7 +1636,7 @@ with aba2:
 
                         conferencia_por_material = False
 
-                        if modo_aba2 == "📥 Fila de Chegada (ordem de entrada)":
+                        if modo_aba2 == "Fila de chegada":
                             st.markdown("### 📥 Fila de Chegada")
                             st.caption("Área independente dos filtros. Os pedidos aparecem na ordem em que chegaram (do mais antigo ao mais recente), com identificação da unidade.")
 
@@ -1938,7 +1974,7 @@ with aba2:
                                 if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
-                    elif modo_aba2 == "💰 Centro de Custos e Orçamento (Efetivo)":
+                    elif sub_relatorio == "Centro de custos":
                         st.write("### 💰 Centro de Custos e Orçamento (Baseado nas Entregas Efetivas)")
                         st.markdown("Acompanhamento financeiro oficial calculado estritamente sobre o que foi despachado aos centros de custos.")
                         
@@ -2048,7 +2084,7 @@ with aba2:
                             csv_cc = df_cc.to_csv(index=False).encode('utf-8')
                             st.download_button("📥 Baixar Dados Completos do Centro de Custos (CSV)", data=csv_cc, file_name="centro_de_custos_efetivo_sispac.csv", mime="text/csv", key="dl_cc")
 
-                    elif modo_aba2 == "📈 Relatórios Analíticos e Gráficos":
+                    elif sub_relatorio == "Analítico e gráficos":
                         st.write("### 📈 Painel Analítico: Solicitado vs. Entregue")
                         
                         col_r1, col_r2, col_r3, col_r4 = st.columns(4)
@@ -2138,8 +2174,8 @@ with aba2:
                                 csv = df_cat_ex.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv", key="dl_cat")
 
-                    else:
-                        st.write("### 🖨️ Emissão de Relatório Oficial (Planejado vs Efetivo)")
+                    elif sub_relatorio == "Relatório oficial":
+                        st.write("### Relatório oficial (solicitado vs entregue)")
                         
                         col_e1, col_e2, col_e3, col_e4 = st.columns(4)
                         with col_e1:
