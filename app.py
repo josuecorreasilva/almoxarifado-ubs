@@ -282,7 +282,18 @@ def filtrar_pedidos_por_numero(df, termo):
     return df[nums.str.contains(re.escape(termo), case=False, regex=True, na=False)]
 
 
-def render_lista_pedidos_clicavel(df_lista, chave):
+def pedido_concluido(status):
+    return str(status or "") in {"Atendido Parcialmente", "Atendido Integralmente"}
+
+
+def status_pedido_unico(pedidos_unicos, numero):
+    m = pedidos_unicos[pedidos_unicos["numero_pedido"].astype(str) == str(numero)]
+    if m.empty:
+        return ""
+    return m["status"].iloc[0]
+
+
+def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
     if df_lista is None or df_lista.empty:
         st.info("Nenhum pedido encontrado.")
         return
@@ -293,7 +304,10 @@ def render_lista_pedidos_clicavel(df_lista, chave):
             data_txt = str(row.get("data") or "")
             if len(data_txt) > 16:
                 data_txt = data_txt[:16]
-            c_txt, c_ver, c_imp = st.columns([6.4, 1.05, 0.95], vertical_alignment="center")
+            if acao == "conferir":
+                c_txt, c_acao = st.columns([7.2, 1.2], vertical_alignment="center")
+            else:
+                c_txt, c_ver, c_imp = st.columns([6.4, 1.05, 0.95], vertical_alignment="center")
             with c_txt:
                 st.markdown(
                     "<p style='text-align:left;margin:0.35rem 0;font-size:0.92rem;'>"
@@ -302,16 +316,27 @@ def render_lista_pedidos_clicavel(df_lista, chave):
                     "</p>",
                     unsafe_allow_html=True,
                 )
-            with c_ver:
-                if st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}"):
-                    st.session_state.pedido_aberto = numero
-                    st.session_state.imprimir_ao_abrir = False
-                    st.rerun()
-            with c_imp:
-                if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
-                    st.session_state.pedido_aberto = numero
-                    st.session_state.imprimir_ao_abrir = True
-                    st.rerun()
+            if acao == "conferir":
+                with c_acao:
+                    if st.session_state.perfil == "GESTAO":
+                        if st.button("Conferir", key=f"{chave}_conf_{i}_{numero}"):
+                            st.session_state.pedido_aberto = numero
+                            st.session_state.modo_abertura = "conferir"
+                            st.session_state.imprimir_ao_abrir = False
+                            st.rerun()
+            else:
+                with c_ver:
+                    if st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}"):
+                        st.session_state.pedido_aberto = numero
+                        st.session_state.modo_abertura = "visualizar"
+                        st.session_state.imprimir_ao_abrir = False
+                        st.rerun()
+                with c_imp:
+                    if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
+                        st.session_state.pedido_aberto = numero
+                        st.session_state.modo_abertura = "visualizar"
+                        st.session_state.imprimir_ao_abrir = True
+                        st.rerun()
 
 
 def status_consolidado_pedido(df_itens):
@@ -1672,21 +1697,26 @@ with aba2:
 
                         conferencia_por_material = False
 
+                        if st.session_state.get("lista_tipo_pedidos") == "Pendentes":
+                            st.session_state.lista_tipo_pedidos = "Pendentes (conferência)"
+                        elif st.session_state.get("lista_tipo_pedidos") == "Concluídos":
+                            st.session_state.lista_tipo_pedidos = "Concluídos (visualizar / imprimir)"
+                        lista_tipo = st.radio(
+                            "Lista",
+                            ["Pendentes (conferência)", "Concluídos (visualizar / imprimir)"],
+                            horizontal=True,
+                            key="lista_tipo_pedidos",
+                        )
+                        so_pendentes = lista_tipo.startswith("Pendentes")
+                        if st.session_state.get("_lista_tipo_ant") != lista_tipo:
+                            st.session_state.pedido_aberto = None
+                            st.session_state.modo_abertura = None
+                            st.session_state.imprimir_ao_abrir = False
+                            st.session_state._lista_tipo_ant = lista_tipo
+                        filtro_status = "Pedido enviado" if so_pendentes else "Concluídos"
+
                         if st.session_state.perfil == "GESTAO":
-                            so_pendentes = st.checkbox(
-                                "Fila: só os que aguardam conferência (ordem de chegada)",
-                                value=True,
-                                key="fila_so_pendentes",
-                            )
-                            col_f_st, col_f_dist, col_f_ubs, col_f_agr = st.columns(4)
-                            with col_f_st:
-                                filtro_status = st.selectbox(
-                                    "Status",
-                                    ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
-                                    index=1 if so_pendentes else 0,
-                                    disabled=so_pendentes,
-                                    key="filtro_status_conf",
-                                )
+                            col_f_dist, col_f_ubs, col_f_agr = st.columns(3)
                             with col_f_dist:
                                 filtro_distrito = st.selectbox(
                                     "Distrito",
@@ -1697,26 +1727,27 @@ with aba2:
                                 ubs_filtro_base = ["Todas"] + sorted(pedidos_unicos["ubs"].dropna().astype(str).unique().tolist())
                                 filtro_ubs = st.selectbox("UBS", ubs_filtro_base, key="filtro_ubs_conf")
                             with col_f_agr:
+                                if not so_pendentes and st.session_state.get("agrupamento_conf") == "Por material (rateio)":
+                                    st.session_state.agrupamento_conf = "Por pedido"
+                                opcoes_agr = ["Por pedido", "Por UBS"]
+                                if so_pendentes:
+                                    opcoes_agr.append("Por material (rateio)")
                                 agrupamento = st.selectbox(
                                     "Agrupar conferência",
-                                    ["Por pedido", "Por UBS", "Por material (rateio)"],
+                                    opcoes_agr,
                                     key="agrupamento_conf",
                                 )
-                            if so_pendentes:
-                                filtro_status = "Pedido enviado"
                         else:
-                            so_pendentes = False
-                            filtro_status = st.selectbox(
-                                "Status",
-                                ["Todos", "Pedido enviado", "Atendido Parcialmente", "Atendido Integralmente"],
-                                key="filtro_status_conf",
-                            )
                             filtro_distrito = "Todos"
                             filtro_ubs = "Todas"
                             agrupamento = "Por pedido"
+                            if so_pendentes:
+                                st.caption("Pedidos enviados aguardam conferência do almoxarifado. Visualizar e imprimir ficam na lista de concluídos.")
 
                         df_lista = pedidos_unicos.copy()
-                        if filtro_status != "Todos":
+                        if filtro_status == "Concluídos":
+                            df_lista = df_lista[df_lista["status"].map(pedido_concluido)]
+                        elif filtro_status != "Todos":
                             df_lista = df_lista[df_lista["status"] == filtro_status]
                         if filtro_distrito != "Todos":
                             df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
@@ -1731,7 +1762,7 @@ with aba2:
 
                         if conferencia_por_material:
                                 st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
-                                st.caption("Quando várias UBS pedem o mesmo item com estoque baixo, o sistema sugere a divisão proporcional do saldo.")
+                                st.caption("Informe a quantidade enviada a cada UBS. O estoque limita o total.")
                                 pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
                                 if filtro_distrito != "Todos":
                                     pendentes = pendentes[pendentes["distrito"] == filtro_distrito]
@@ -1752,21 +1783,19 @@ with aba2:
                                         materiais_lote_conf,
                                     )
                                     qtds_pedidas = [parse_numero(q, inteiro=True) for q in linhas_mat["quantidade"].tolist()]
-                                    sugestoes = sugerir_rateio(qtds_pedidas, estoque_atual)
                                     demanda_total = sum(qtds_pedidas)
                                     m1, m2, m3 = st.columns(3)
                                     m1.metric("Estoque atual", f"{estoque_atual} un.")
                                     m2.metric("Demanda pendente", f"{demanda_total} un.")
                                     m3.metric("UBS solicitantes", linhas_mat["ubs"].nunique())
                                     if demanda_total > estoque_atual:
-                                        st.warning("Estoque insuficiente para atender todas as unidades. As quantidades sugeridas já estão rateadas.")
+                                        st.warning("Estoque insuficiente para atender todas as unidades. Informe o que será enviado a cada UBS.")
 
                                     with st.form(key=f"form_rateio_{material_rateio}"):
                                         novas_quantidades_entregues = {}
                                         for i, (idx, row) in enumerate(linhas_mat.iterrows()):
                                             qtd_pedida = parse_numero(row["quantidade"], inteiro=True)
-                                            max_entregue = max(0, min(qtd_pedida, estoque_atual if demanda_total <= estoque_atual else qtd_pedida))
-                                            sugerido = min(sugestoes[i] if i < len(sugestoes) else 0, max_entregue)
+                                            qtd_ja = parse_numero(row.get("quantidade_entregue", 0), inteiro=True) if "quantidade_entregue" in row else 0
                                             c1, c2, c3, c4 = st.columns([1.3, 2.2, 1, 1])
                                             c1.write(f"**{row['ubs']}**")
                                             c2.write(f"{row['numero_pedido']}")
@@ -1775,7 +1804,7 @@ with aba2:
                                                 f"Entregar ({row['ubs']})",
                                                 min_value=0,
                                                 max_value=qtd_pedida,
-                                                value=sugerido,
+                                                value=min(qtd_ja, qtd_pedida),
                                                 key=f"rateio_{row['id'] if 'id' in row else idx}",
                                             )
                                             novas_quantidades_entregues[row["id"] if "id" in row else idx] = val_entregue
@@ -1798,14 +1827,17 @@ with aba2:
                                                 st.error(f"Erro ao salvar rateio: {e}")
 
                                 st.markdown("---")
-                                st.write("**Fila de pedidos (para comprovante):**")
+                                st.write("**Pedidos deste filtro:**")
                                 busca_rateio = st.text_input("Buscar número do pedido", key="busca_num_pedido_rateio")
                                 df_lista_rateio = filtrar_pedidos_por_numero(df_lista, busca_rateio)
-                                render_lista_pedidos_clicavel(df_lista_rateio, "rateio")
                                 if busca_rateio.strip() and (df_lista_rateio is None or df_lista_rateio.empty):
                                     st.warning("Nenhum pedido com esse número.")
-                                elif busca_rateio.strip() and len(df_lista_rateio) == 1:
-                                    st.session_state.pedido_aberto = str(df_lista_rateio.iloc[0]["numero_pedido"])
+                                elif df_lista_rateio is not None and not df_lista_rateio.empty:
+                                    st.dataframe(
+                                        df_lista_rateio[["numero_pedido", "ubs", "status", "data"]],
+                                        hide_index=True,
+                                        use_container_width=True,
+                                    )
                         else:
                             if agrupamento == "Por UBS" and st.session_state.perfil == "GESTAO" and filtro_ubs == "Todas":
                                 ubs_grupo = st.selectbox(
@@ -1822,24 +1854,48 @@ with aba2:
                                 st.warning("Nenhum pedido com esse número.")
                             else:
                                 if busca_pedido.strip() and len(df_lista) == 1:
-                                    st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
-                                render_lista_pedidos_clicavel(df_lista, "acomp")
+                                    if so_pendentes and st.session_state.perfil != "GESTAO":
+                                        pass
+                                    else:
+                                        st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
+                                        st.session_state.modo_abertura = "conferir" if so_pendentes else "visualizar"
+                                render_lista_pedidos_clicavel(
+                                    df_lista,
+                                    "acomp",
+                                    acao="conferir" if so_pendentes else "visualizar",
+                                )
 
                         pedido_selecionado = st.session_state.get("pedido_aberto") or "Selecione..."
                         if pedido_selecionado not in set(pedidos_unicos["numero_pedido"].astype(str)):
                             pedido_selecionado = "Selecione..."
-                        
+                        st_pedido = status_pedido_unico(pedidos_unicos, pedido_selecionado) if pedido_selecionado != "Selecione..." else ""
+                        if pedido_selecionado != "Selecione..." and so_pendentes and pedido_concluido(st_pedido):
+                            pedido_selecionado = "Selecione..."
+                        if pedido_selecionado != "Selecione..." and not so_pendentes and not pedido_concluido(st_pedido):
+                            pedido_selecionado = "Selecione..."
+                        if pedido_selecionado != "Selecione..." and so_pendentes and st.session_state.perfil != "GESTAO":
+                            pedido_selecionado = "Selecione..."
+
                         if pedido_selecionado != "Selecione...":
                             if st.button("← Voltar à lista", key="btn_voltar_pedido"):
                                 st.session_state.pedido_aberto = None
+                                st.session_state.modo_abertura = None
                                 st.rerun()
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = status_consolidado_pedido(detalhes)
+                            modo_abertura = st.session_state.get("modo_abertura") or (
+                                "conferir" if so_pendentes else "visualizar"
+                            )
 
-                            # Tela de Conferência exclusiva para a Gestão
-                            if st.session_state.perfil == "GESTAO" and not conferencia_por_material:
-                                st.markdown("### 📦 Painel de Conferência do Almoxarifado (Itens Entregues)")
-                                st.info("Com estoque baixo, a quantidade sugerida já considera o rateio com outras UBS que pediram o mesmo item.")
+                            # Conferência só na lista de pendentes
+                            if (
+                                st.session_state.perfil == "GESTAO"
+                                and not conferencia_por_material
+                                and modo_abertura == "conferir"
+                                and not pedido_concluido(status_atual)
+                            ):
+                                st.markdown("### Conferência do almoxarifado")
+                                st.caption("Informe a quantidade efetivamente enviada.")
 
                                 saidas_conf = mapa_saidas_conferidas()
                                 saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
@@ -1863,16 +1919,7 @@ with aba2:
                                         teto_fisico = estoque_atual + (qtd_db_entregue if ja_baixou_estoque else 0)
                                         max_entregue = max(0, min(qtd_pedida, teto_fisico))
                                         demanda = demanda_pendente_material(df_supabase, mat, pedido_selecionado)
-                                        if qtd_db_entregue == 0 and not ja_baixou_estoque:
-                                            if demanda["outras_ubs"] > 0:
-                                                qtd_sugerida = sugerir_rateio([qtd_pedida, demanda["outras_ubs"]], estoque_atual)[0]
-                                            else:
-                                                qtd_sugerida = min(qtd_pedida, max_entregue)
-                                            qtd_sugerida = min(qtd_sugerida, max_entregue)
-                                            if 0 < estoque_atual <= LIMIAR_ESTOQUE_BAIXO:
-                                                qtd_sugerida = min(qtd_sugerida, estoque_atual, qtd_pedida)
-                                        else:
-                                            qtd_sugerida = min(qtd_db_entregue, max_entregue)
+                                        qtd_inicial = min(qtd_db_entregue, max_entregue)
                                             
                                         c_mat, c_est, c_ped, c_ent = st.columns([2.2, 1.6, 1, 1])
                                         c_mat.write(f"**{mat}** (Cat: {row['categoria']})")
@@ -1892,12 +1939,10 @@ with aba2:
                                             f"Entregue ({mat})", 
                                             min_value=0, 
                                             max_value=max(max_entregue, 0), 
-                                            value=qtd_sugerida,
+                                            value=qtd_inicial,
                                             key=f"ent_{row['id'] if 'id' in row else idx}"
                                         )
                                         novas_quantidades_entregues[row['id'] if 'id' in row else idx] = val_entregue
-                                        if 0 < estoque_atual <= LIMIAR_ESTOQUE_BAIXO or demanda["outras_ubs"] > 0:
-                                            st.caption(f"Quantidade sugerida: **{qtd_sugerida} un.** (estoque baixo / rateio). {texto_outras_solicitacoes(demanda)}")
                                         if demanda["total"] > estoque_atual and not ja_baixou_estoque:
                                             st.warning(
                                                 f"Demanda pendente de **{mat}** ({demanda['total']} un., incluindo este pedido) é maior que o estoque ({estoque_atual} un.)."
@@ -1920,71 +1965,71 @@ with aba2:
                                 
                                 st.markdown("---")
 
-                            # Atualiza os detalhes locais após possível alteração
-                            response_atu = supabase.table("pedidos").select("*").eq("numero_pedido", pedido_selecionado).execute()
-                            detalhes = pd.DataFrame(response_atu.data)
-                            status_atual = status_consolidado_pedido(detalhes) if not detalhes.empty else status_atual
+                            if modo_abertura != "conferir":
+                                response_atu = supabase.table("pedidos").select("*").eq("numero_pedido", pedido_selecionado).execute()
+                                detalhes = pd.DataFrame(response_atu.data)
+                                status_atual = status_consolidado_pedido(detalhes) if not detalhes.empty else status_atual
 
-                            obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
+                                obs_geral = detalhes['observacao'].iloc[0] if 'observacao' in detalhes.columns and pd.notna(detalhes['observacao'].iloc[0]) else ""
 
-                            if st.session_state.perfil == "GESTAO":
-                                modelo_impressao = st.radio(
-                                    "Modelo de impressão do pedido",
-                                    ["Sem valores (via operacional)", "Com custos (via gerencial)"],
-                                    horizontal=True,
-                                    key=f"modelo_imp_{pedido_selecionado}",
-                                )
-                                sem_custo_print = modelo_impressao.startswith("Sem valores")
-                            else:
-                                sem_custo_print = True
-                                st.caption("A via impressa desta unidade não inclui valores unitários nem custo total.")
+                                if st.session_state.perfil == "GESTAO":
+                                    modelo_impressao = st.radio(
+                                        "Modelo de impressão do pedido",
+                                        ["Sem valores (via operacional)", "Com custos (via gerencial)"],
+                                        horizontal=True,
+                                        key=f"modelo_imp_{pedido_selecionado}",
+                                    )
+                                    sem_custo_print = modelo_impressao.startswith("Sem valores")
+                                else:
+                                    sem_custo_print = True
+                                    st.caption("A via impressa desta unidade não inclui valores unitários nem custo total.")
 
-                            html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
-                            st.markdown(html_pedido, unsafe_allow_html=True)
-                            if st.session_state.get("imprimir_ao_abrir"):
-                                st.session_state.imprimir_ao_abrir = False
-                                st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
-
-                            sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
-                            nome_pdf = aplicar_sufixo_arquivo(
-                                nome_arquivo_pedido(
-                                    pedido_selecionado,
-                                    detalhes["ubs"].iloc[0],
-                                    detalhes["data"].iloc[0],
-                                    extensao="pdf",
-                                ),
-                                sufixo_via,
-                            )
-                            nome_csv_final = nome_pdf.replace(".pdf", ".csv")
-                            pdf_bytes = gerar_pdf_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
-
-                            csv_cols = [c for c in ["numero_pedido", "data", "distrito", "ubs", "categoria", "material", "quantidade", "quantidade_entregue", "status", "observacao"] if c in detalhes.columns]
-                            if sem_custo_print and csv_cols:
-                                csv_pedido = detalhes[csv_cols].to_csv(index=False).encode("utf-8")
-                            else:
-                                csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
-
-                            st.caption(f"Nome do arquivo: `{nome_pdf}`")
-                            c_pdf, c_csv, c_imp = st.columns(3)
-                            with c_pdf:
-                                st.download_button(
-                                    "Baixar comprovante em PDF",
-                                    data=pdf_bytes,
-                                    file_name=nome_pdf,
-                                    mime="application/pdf",
-                                    key=f"dl_pdf_{pedido_selecionado}",
-                                )
-                            with c_csv:
-                                st.download_button(
-                                    "Baixar planilha (CSV)",
-                                    data=csv_pedido,
-                                    file_name=nome_csv_final,
-                                    mime="text/csv",
-                                    key=f"dl_comp_{pedido_selecionado}",
-                                )
-                            with c_imp:
-                                if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
+                                html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
+                                st.markdown(html_pedido, unsafe_allow_html=True)
+                                if st.session_state.get("imprimir_ao_abrir"):
+                                    st.session_state.imprimir_ao_abrir = False
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+
+                                sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
+                                nome_pdf = aplicar_sufixo_arquivo(
+                                    nome_arquivo_pedido(
+                                        pedido_selecionado,
+                                        detalhes["ubs"].iloc[0],
+                                        detalhes["data"].iloc[0],
+                                        extensao="pdf",
+                                    ),
+                                    sufixo_via,
+                                )
+                                nome_csv_final = nome_pdf.replace(".pdf", ".csv")
+                                pdf_bytes = gerar_pdf_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
+
+                                csv_cols = [c for c in ["numero_pedido", "data", "distrito", "ubs", "categoria", "material", "quantidade", "quantidade_entregue", "status", "observacao"] if c in detalhes.columns]
+                                if sem_custo_print and csv_cols:
+                                    csv_pedido = detalhes[csv_cols].to_csv(index=False).encode("utf-8")
+                                else:
+                                    csv_pedido = detalhes.to_csv(index=False).encode("utf-8")
+
+                                st.caption(f"Nome do arquivo: `{nome_pdf}`")
+                                c_pdf, c_csv, c_imp = st.columns(3)
+                                with c_pdf:
+                                    st.download_button(
+                                        "Baixar comprovante em PDF",
+                                        data=pdf_bytes,
+                                        file_name=nome_pdf,
+                                        mime="application/pdf",
+                                        key=f"dl_pdf_{pedido_selecionado}",
+                                    )
+                                with c_csv:
+                                    st.download_button(
+                                        "Baixar planilha (CSV)",
+                                        data=csv_pedido,
+                                        file_name=nome_csv_final,
+                                        mime="text/csv",
+                                        key=f"dl_comp_{pedido_selecionado}",
+                                    )
+                                with c_imp:
+                                    if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
+                                        st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif sub_relatorio == "Centro de custos":
                         st.write("### Centro de custos")
