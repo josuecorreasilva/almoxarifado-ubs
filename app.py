@@ -1314,6 +1314,7 @@ def persistir_entregas(atualizacoes, obs_g=""):
             "pedidos",
             f"{len(itens)} item(ns); {', '.join({item['numero_pedido'] for item in itens if item['numero_pedido']})}",
         )
+        creditar_entregas_nas_ubs(atualizacoes, usuario)
 
 
 def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None):
@@ -1346,6 +1347,7 @@ def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None):
         )
         numeros_afetados.append(str(row_original.get("numero_pedido") or ""))
     atualizar_status_pedidos(numeros_afetados)
+    creditar_entregas_nas_ubs(atualizacoes, usuario)
 
 
 def atualizar_status_pedidos(numeros):
@@ -1418,6 +1420,221 @@ def aplicar_baixa_estoque_central(material, delta, usuario=None, numero_pedido=N
             }).eq("id", lote["id"]).eq("quantidade_atual", atual).execute()
     except Exception:
         pass
+
+
+def creditar_entregas_nas_ubs(atualizacoes, usuario=None):
+    for _row_id, nova_qtd, row_original in atualizacoes:
+        delta = int(nova_qtd) - parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
+        tipo = "ENTRADA" if delta > 0 else "ESTORNO"
+        try:
+            aplicar_estoque_ubs(
+                str(row_original.get("ubs") or "").strip(),
+                str(row_original.get("material") or "").strip(),
+                delta,
+                tipo=tipo,
+                usuario=usuario,
+                numero_pedido=str(row_original.get("numero_pedido") or ""),
+                observacao="Entrada pela conferência do almoxarifado",
+                distrito=str(row_original.get("distrito") or "").strip(),
+            )
+        except Exception:
+            registrar_auditoria(
+                "FALHA_ESTOQUE_UBS",
+                "estoque_ubs",
+                f"{row_original.get('ubs')} / {row_original.get('material')} / {delta}",
+            )
+
+
+def aplicar_estoque_ubs(
+    ubs,
+    material,
+    delta,
+    tipo="CONSUMO",
+    usuario=None,
+    numero_pedido=None,
+    observacao=None,
+    distrito=None,
+):
+    delta = int(delta or 0)
+    ubs = str(ubs or "").strip()
+    material = str(material or "").strip()
+    if delta == 0 or not ubs or not material:
+        return
+    try:
+        supabase.rpc("sispac_movimentar_estoque_ubs", {
+            "p_ubs": ubs,
+            "p_material": material,
+            "p_quantidade": delta,
+            "p_usuario": usuario or st.session_state.get("email_usuario"),
+            "p_numero_pedido": numero_pedido,
+            "p_observacao": observacao,
+            "p_distrito": distrito,
+            "p_tipo": tipo,
+        }).execute()
+        return
+    except Exception as erro:
+        if "SISPAC_UBS_SALDO" in str(erro):
+            raise RuntimeError(
+                "Esta unidade não tem saldo suficiente deste material para baixar."
+            ) from erro
+        if not _rpc_ausente(erro):
+            raise
+    try:
+        resposta = supabase.table("estoque_ubs").select("id,quantidade_atual,ubs,material").execute()
+        linhas = [
+            linha for linha in (resposta.data or [])
+            if str(linha.get("ubs") or "").strip().lower() == ubs.lower()
+            and str(linha.get("material") or "").strip().lower() == material.lower()
+        ]
+        if not linhas:
+            if delta < 0:
+                raise RuntimeError("Esta unidade não tem saldo suficiente deste material para baixar.")
+            supabase.table("estoque_ubs").insert({
+                "ubs": ubs,
+                "distrito": distrito or "",
+                "material": material,
+                "quantidade_atual": delta,
+            }).execute()
+            novo = delta
+        else:
+            atual = parse_numero(linhas[0].get("quantidade_atual"), inteiro=True)
+            novo = atual + delta
+            if novo < 0:
+                raise RuntimeError("Esta unidade não tem saldo suficiente deste material para baixar.")
+            supabase.table("estoque_ubs").update({
+                "quantidade_atual": novo,
+            }).eq("id", linhas[0]["id"]).execute()
+        supabase.table("movimentos_estoque_ubs").insert({
+            "tipo": tipo,
+            "ubs": ubs,
+            "distrito": distrito or "",
+            "material": material,
+            "quantidade": delta,
+            "saldo_apos": novo,
+            "numero_pedido": numero_pedido,
+            "usuario": usuario or st.session_state.get("email_usuario"),
+            "observacao": observacao,
+        }).execute()
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+
+def carregar_estoque_ubs(ubs=None):
+    try:
+        resposta = supabase.table("estoque_ubs").select("*").execute()
+        df = pd.DataFrame(resposta.data or [])
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return df
+    if ubs:
+        df = df[df["ubs"].astype(str).str.strip().str.lower() == str(ubs).strip().lower()]
+    if "quantidade_atual" in df.columns:
+        df = df.sort_values(by=["ubs", "material"], kind="stable")
+    return df
+
+
+def carregar_movimentos_ubs(ubs=None, limite=100):
+    try:
+        resposta = (
+            supabase.table("movimentos_estoque_ubs")
+            .select("*")
+            .order("criado_em", desc=True)
+            .limit(limite)
+            .execute()
+        )
+        df = pd.DataFrame(resposta.data or [])
+    except Exception:
+        return pd.DataFrame()
+    if df.empty or not ubs:
+        return df
+    return df[df["ubs"].astype(str).str.strip().str.lower() == str(ubs).strip().lower()]
+
+
+def render_painel_estoque_ubs(modo_gestao=False):
+    ubs_sessao = st.session_state.get("ubs_nome")
+    prefixo = "gestao" if modo_gestao else "ubs"
+    if modo_gestao:
+        df_todos = carregar_estoque_ubs()
+        if df_todos.empty:
+            st.info("Ainda não há saldo nas unidades. Ele passa a ser registrado nas próximas conferências, depois de executar o SQL `sispac_estoque_ubs.sql` no Supabase.")
+            return
+        unidades = ["Todas"] + sorted(
+            {str(u).strip() for u in df_todos["ubs"].dropna().tolist() if str(u).strip()}
+        )
+        ubs_filtro = st.selectbox("Unidade", unidades, key=f"est_{prefixo}_filtro_ubs")
+        if ubs_filtro == "Todas":
+            df_saldo = df_todos
+            ubs_mov = None
+        else:
+            df_saldo = df_todos[df_todos["ubs"].astype(str).str.strip() == ubs_filtro]
+            ubs_mov = ubs_filtro
+    else:
+        df_saldo = carregar_estoque_ubs(ubs_sessao)
+        ubs_mov = ubs_sessao
+        if df_saldo.empty:
+            st.info("Esta unidade ainda não tem saldo. Ele aparece depois que o almoxarifado conferir um pedido (e o SQL do estoque por UBS estiver no banco).")
+
+    busca = st.text_input("Buscar material", key=f"est_{prefixo}_busca", placeholder="Digite parte do nome")
+    if busca and not df_saldo.empty and "material" in df_saldo.columns:
+        df_saldo = df_saldo[df_saldo["material"].astype(str).str.contains(busca.strip(), case=False, regex=False, na=False)]
+
+    colunas_saldo = [c for c in ["ubs", "distrito", "material", "quantidade_atual", "atualizado_em"] if c in df_saldo.columns]
+    if not modo_gestao:
+        colunas_saldo = [c for c in colunas_saldo if c != "ubs"]
+    if not df_saldo.empty:
+        st.dataframe(
+            df_saldo[colunas_saldo] if colunas_saldo else df_saldo,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(f"{len(df_saldo)} material(is) no estoque da unidade.")
+
+    if not modo_gestao:
+        st.markdown("##### Registrar consumo")
+        df_consumo = carregar_estoque_ubs(ubs_sessao)
+        opcoes_mat = []
+        if not df_consumo.empty and "material" in df_consumo.columns:
+            df_pos = df_consumo
+            if "quantidade_atual" in df_pos.columns:
+                df_pos = df_pos[pd.to_numeric(df_pos["quantidade_atual"], errors="coerce").fillna(0) > 0]
+            opcoes_mat = sorted({str(m).strip() for m in df_pos["material"].dropna() if str(m).strip()})
+        with st.form(f"form_consumo_{prefixo}"):
+            material_cons = st.selectbox(
+                "Material usado",
+                opcoes_mat if opcoes_mat else ["Nenhum saldo para baixar"],
+            )
+            qtd_cons = st.number_input("Quantidade consumida", min_value=1, value=1)
+            obs_cons = st.text_input("Observação (opcional)")
+            if st.form_submit_button("Baixar do estoque da unidade"):
+                if material_cons == "Nenhum saldo para baixar":
+                    st.error("Não há material com saldo para consumo.")
+                else:
+                    try:
+                        aplicar_estoque_ubs(
+                            ubs_sessao,
+                            material_cons,
+                            -int(qtd_cons),
+                            tipo="CONSUMO",
+                            observacao=(obs_cons or "").strip() or "Consumo na unidade",
+                        )
+                        registrar_auditoria("CONSUMO_UBS", "estoque_ubs", f"{ubs_sessao} / {material_cons} / {qtd_cons}")
+                        st.success("Consumo registrado. O saldo desta unidade foi atualizado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+    st.markdown("##### Movimentos recentes")
+    df_mov = carregar_movimentos_ubs(ubs_mov, limite=80)
+    if df_mov.empty:
+        st.caption("Sem movimentos nesta unidade ainda.")
+    else:
+        colunas_mov = [c for c in ["criado_em", "ubs", "tipo", "material", "quantidade", "saldo_apos", "numero_pedido", "usuario", "observacao"] if c in df_mov.columns]
+        if not modo_gestao and "ubs" in colunas_mov:
+            colunas_mov.remove("ubs")
+        st.dataframe(df_mov[colunas_mov] if colunas_mov else df_mov, use_container_width=True, hide_index=True)
 
 
 @st.cache_data(ttl=300)
@@ -1515,8 +1732,9 @@ with col_titulo:
 
 if st.session_state.perfil == "GESTAO":
     aba1, aba2, aba3 = st.tabs(["Novo pedido", "Painel gerencial", "Cadastro e estoque"])
+    aba_estoque_ubs = None
 else:
-    aba1, aba2 = st.tabs(["Novo pedido", "Acompanhar pedidos"])
+    aba1, aba2, aba_estoque_ubs = st.tabs(["Novo pedido", "Acompanhar pedidos", "Estoque da unidade"])
     aba3 = None
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
@@ -2780,3 +2998,14 @@ if aba3 is not None:
                 st.caption("Sem registros de auditoria ainda.")
         except Exception:
             st.caption("Tabela de auditoria ainda não existe no banco.")
+
+        st.markdown("---")
+        st.markdown("##### Estoque das unidades (piloto)")
+        st.caption("Saldo que chegou na UBS após a conferência. A unidade registra o consumo. Não mistura com o estoque central.")
+        render_painel_estoque_ubs(modo_gestao=True)
+
+if aba_estoque_ubs is not None:
+    with aba_estoque_ubs:
+        st.markdown("#### Estoque desta unidade")
+        st.caption("O que o almoxarifado enviou entra aqui. Informe o que foi usado no dia a dia para o saldo ficar correto.")
+        render_painel_estoque_ubs(modo_gestao=False)
