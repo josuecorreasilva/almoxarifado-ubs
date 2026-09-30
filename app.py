@@ -176,6 +176,20 @@ st.markdown("""
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] {
         min-height: 1.3rem !important;
     }
+    .st-key-lista_pedidos div.stButton > button {
+        text-align: left !important;
+        justify-content: flex-start !important;
+        font-size: 0.86rem !important;
+        font-weight: 500 !important;
+        padding: 0.4rem 0.7rem !important;
+        border: 1px solid #d5e4e6 !important;
+        background: #f7fafb !important;
+        color: #1a3338 !important;
+    }
+    .st-key-lista_pedidos div.stButton > button:hover {
+        border-color: #0e4d56 !important;
+        background: #eef6f7 !important;
+    }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
         font-weight: 500 !important;
@@ -278,16 +292,21 @@ def render_lista_pedidos_clicavel(df_lista, chave):
         st.info("Nenhum pedido encontrado.")
         return
     df_lista = df_lista.reset_index(drop=True)
-    st.caption("Clique no pedido para abrir.")
-    for i, row in df_lista.iterrows():
-        numero = str(row["numero_pedido"])
-        rotulo = (
-            f"{numero}  ·  {row.get('ubs', '')}  ·  {row.get('data', '')}  ·  "
-            f"{row.get('status', '')}  ·  {int(row.get('itens') or 0)} item(ns)"
-        )
-        if st.button(rotulo, key=f"{chave}_{i}_{numero}", use_container_width=True):
-            st.session_state.pedido_aberto = numero
-            st.rerun()
+    col_lista, _ = st.columns([0.62, 1.38])
+    with col_lista:
+        with st.container(key="lista_pedidos"):
+            st.markdown("**Pedidos**")
+            st.caption("Lista à esquerda — clique para abrir.")
+            for i, row in df_lista.iterrows():
+                numero = str(row["numero_pedido"])
+                data_txt = str(row.get("data") or "")
+                if len(data_txt) > 16:
+                    data_txt = data_txt[:16]
+                rotulo = f"{numero}  ·  {row.get('ubs', '')}"
+                if st.button(rotulo, key=f"{chave}_{i}_{numero}", use_container_width=True):
+                    st.session_state.pedido_aberto = numero
+                    st.rerun()
+                st.caption(f"{data_txt}  ·  {row.get('status', '')}  ·  {int(row.get('itens') or 0)} item(ns)")
 
 
 def status_consolidado_pedido(df_itens):
@@ -1554,7 +1573,7 @@ with aba2:
     if st.session_state.perfil == "GESTAO":
         st.markdown(
             "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Operação da fila e conferência. Relatórios (analítico, oficial e custos) ficam em um só menu.</p></div>",
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Fila e conferência. Relatórios abrem em tela própria, sem este menu.</p></div>",
             unsafe_allow_html=True,
         )
     else:
@@ -1598,20 +1617,32 @@ with aba2:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
                     if st.session_state.perfil == "GESTAO":
-                        modo_aba2 = st.radio(
-                            "Área",
-                            ["Fila de chegada", "Pedidos e conferência", "Relatórios"],
-                            horizontal=True,
-                            key="radio_area_painel",
-                        )
-                        sub_relatorio = None
-                        if modo_aba2 == "Relatórios":
+                        if "em_relatorios" not in st.session_state:
+                            st.session_state.em_relatorios = False
+                        if st.session_state.em_relatorios:
+                            if st.button("← Voltar ao painel", key="btn_voltar_painel"):
+                                st.session_state.em_relatorios = False
+                                st.rerun()
+                            st.markdown("#### Relatórios")
+                            st.caption("Painel analítico: gráficos do dia a dia. Documento oficial: PDF para assinatura. Centro de custos: valores efetivamente despachados.")
                             sub_relatorio = st.radio(
                                 "Tipo de relatório",
-                                ["Analítico e gráficos", "Relatório oficial", "Centro de custos"],
+                                ["Painel analítico", "Documento oficial", "Centro de custos"],
                                 horizontal=True,
-                                key="sub_relatorio_gestao",
+                                key="tipo_relatorio_pagina",
                             )
+                            modo_aba2 = "Relatórios"
+                        else:
+                            modo_aba2 = st.radio(
+                                "Área",
+                                ["Fila de chegada", "Pedidos e conferência", "Relatórios"],
+                                horizontal=True,
+                                key="radio_area_painel",
+                            )
+                            sub_relatorio = None
+                            if modo_aba2 == "Relatórios":
+                                st.session_state.em_relatorios = True
+                                st.rerun()
                     else:
                         modo_aba2 = "Pedidos e conferência"
                         sub_relatorio = None
@@ -1975,8 +2006,8 @@ with aba2:
                                     st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
 
                     elif sub_relatorio == "Centro de custos":
-                        st.write("### 💰 Centro de Custos e Orçamento (Baseado nas Entregas Efetivas)")
-                        st.markdown("Acompanhamento financeiro oficial calculado estritamente sobre o que foi despachado aos centros de custos.")
+                        st.write("### Centro de custos")
+                        st.caption("Somente o que já foi conferido e despachado — base para orçamento.")
                         
                         col_f1, col_f2, col_f3 = st.columns(3)
                         with col_f1:
@@ -2084,8 +2115,9 @@ with aba2:
                             csv_cc = df_cc.to_csv(index=False).encode('utf-8')
                             st.download_button("📥 Baixar Dados Completos do Centro de Custos (CSV)", data=csv_cc, file_name="centro_de_custos_efetivo_sispac.csv", mime="text/csv", key="dl_cc")
 
-                    elif sub_relatorio == "Analítico e gráficos":
-                        st.write("### 📈 Painel Analítico: Solicitado vs. Entregue")
+                    elif sub_relatorio == "Painel analítico":
+                        st.write("### Painel analítico — solicitado vs entregue")
+                        st.caption("Consulta gerencial com tabela e gráfico. Não substitui o documento oficial.")
                         
                         col_r1, col_r2, col_r3, col_r4 = st.columns(4)
                         with col_r1:
@@ -2174,8 +2206,9 @@ with aba2:
                                 csv = df_cat_ex.to_csv(index=False).encode('utf-8')
                                 st.download_button("📥 Baixar Relatório da Categoria em CSV", data=csv, file_name=f"relatorio_categoria_{cat_escolhida}.csv", mime="text/csv", key="dl_cat")
 
-                    elif sub_relatorio == "Relatório oficial":
-                        st.write("### Relatório oficial (solicitado vs entregue)")
+                    elif sub_relatorio == "Documento oficial":
+                        st.write("### Documento oficial")
+                        st.caption("Peça para impressão ou PDF, com totais e espaço de assinatura.")
                         
                         col_e1, col_e2, col_e3, col_e4 = st.columns(4)
                         with col_e1:
