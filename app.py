@@ -1134,7 +1134,9 @@ def ativar_filtro_digitacao():
     });
   }
   function procurar() {
-    doc.querySelectorAll('input[aria-label="Filtrar pelo nome do material"], .st-key-filtro_nome_catalogo input').forEach(ligar);
+    doc.querySelectorAll(
+      'input[aria-label="Filtrar pelo nome do material"], .st-key-filtro_nome_catalogo input, input[aria-label="Buscar material cadastrado"], .st-key-filtro_materiais_cadastro input'
+    ).forEach(ligar);
   }
   procurar();
   new MutationObserver(procurar).observe(doc.body, { childList: true, subtree: true });
@@ -2626,7 +2628,49 @@ if aba3 is not None:
             if df_cat_banco.empty:
                 st.info("Ainda não há materiais só no banco. A planilha continua valendo.")
             else:
-                st.dataframe(df_cat_banco, use_container_width=True, hide_index=True)
+                st.markdown("**Materiais cadastrados no banco**")
+                f_cat_b, f_nome_b = st.columns([1.15, 1.85])
+                with f_cat_b:
+                    filtro_cat_banco = st.selectbox(
+                        "Categoria",
+                        ["Todas"] + opcoes_cat_cadastro,
+                        key="filtro_cat_materiais_banco",
+                    )
+                with f_nome_b:
+                    filtro_mat_banco = st.text_input(
+                        "Buscar material cadastrado",
+                        key="filtro_materiais_cadastro",
+                        placeholder="Digite parte do nome",
+                    )
+                ativar_filtro_digitacao()
+                df_show_banco = df_cat_banco.copy()
+                if filtro_cat_banco != "Todas" and "categoria" in df_show_banco.columns:
+                    df_show_banco = df_show_banco[
+                        df_show_banco["categoria"].astype(str).str.strip() == str(filtro_cat_banco).strip()
+                    ]
+                termo_banco = str(filtro_mat_banco or "").strip()
+                if termo_banco:
+                    if "material" in df_show_banco.columns:
+                        mascara = df_show_banco["material"].astype(str).str.contains(
+                            termo_banco, case=False, regex=False, na=False
+                        )
+                        if "categoria" in df_show_banco.columns:
+                            mascara = mascara | df_show_banco["categoria"].astype(str).str.contains(
+                                termo_banco, case=False, regex=False, na=False
+                            )
+                        df_show_banco = df_show_banco[mascara]
+                    else:
+                        mascara = False
+                        for col in df_show_banco.columns:
+                            mascara = mascara | df_show_banco[col].astype(str).str.contains(
+                                termo_banco, case=False, regex=False, na=False
+                            )
+                        df_show_banco = df_show_banco[mascara]
+                st.caption(f"Mostrando {len(df_show_banco)} de {len(df_cat_banco)} material(is).")
+                if df_show_banco.empty:
+                    st.info("Nenhum material com esse filtro.")
+                else:
+                    st.dataframe(df_show_banco, use_container_width=True, hide_index=True)
 
         with col_est:
             st.markdown("##### Entrada de lote")
