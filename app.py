@@ -1875,7 +1875,7 @@ with aba1:
 
         with st.container(key="catalogo_marcacao"):
             st.markdown("##### Catálogo da categoria")
-            st.caption("Clique no nome para marcar. A quantidade fica ao lado do item. A lista filtra enquanto você digita.")
+            st.caption("Informe a quantidade e clique em Incluir. O item entra na requisição. Trocar a categoria ou o filtro não muda o que já foi adicionado.")
             filtro_nome = st.text_input(
                 "Filtrar pelo nome do material",
                 key="filtro_nome_catalogo",
@@ -1889,46 +1889,38 @@ with aba1:
             if df_filtrado.empty:
                 st.info("Nenhum material nesta categoria com o filtro atual.")
             else:
-                cab_item, cab_qtd, cab_espaco = st.columns([4.4, 0.9, 3.2])
+                cab_item, cab_qtd, cab_btn = st.columns([4.4, 0.9, 1.2])
                 cab_item.markdown("**Item**")
                 cab_qtd.markdown("**Qtd**")
-                cab_espaco.write("")
-                with st.form("form_catalogo_itens"):
-                    escolhas = []
-                    for i, (_, item_row) in enumerate(df_filtrado.iterrows()):
-                        material_cat = str(item_row[col_material]).strip()
-                        valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
-                        c_chk, c_qtd, _ = st.columns([4.4, 0.9, 3.2])
-                        marcado = c_chk.checkbox(material_cat, key=f"cat_chk_{i}")
-                        qtd_item = c_qtd.number_input(
-                            "Qtd",
-                            min_value=1,
-                            value=1,
-                            step=1,
-                            key=f"cat_qtd_{i}",
-                            label_visibility="collapsed",
+                cab_btn.write("")
+                for _, item_row in df_filtrado.iterrows():
+                    material_cat = str(item_row[col_material]).strip()
+                    valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
+                    chave_mat = re.sub(r"\W+", "_", material_cat)[:80]
+                    c_item, c_qtd, c_btn = st.columns([4.4, 0.9, 1.2])
+                    c_item.write(material_cat)
+                    qtd_item = c_qtd.number_input(
+                        "Qtd",
+                        min_value=1,
+                        value=1,
+                        step=1,
+                        key=f"pedido_qtd_{categoria_selecionada}_{chave_mat}",
+                        label_visibility="collapsed",
+                    )
+                    if c_btn.button("Incluir", key=f"pedido_add_{categoria_selecionada}_{chave_mat}"):
+                        incluir_item_carrinho(
+                            distrito_selecionado,
+                            ubs_selecionada,
+                            categoria_selecionada,
+                            material_cat,
+                            qtd_item,
+                            valor_item,
                         )
-                        escolhas.append((marcado, material_cat, qtd_item, valor_item))
-                    incluir_marcados = st.form_submit_button("Incluir itens marcados", type="primary")
-                if incluir_marcados:
-                    marcados = [e for e in escolhas if e[0]]
-                    if not marcados:
-                        st.warning("Marque pelo menos um item.")
-                    else:
-                        for _, material_cat, qtd_item, valor_item in marcados:
-                            incluir_item_carrinho(
-                                distrito_selecionado,
-                                ubs_selecionada,
-                                categoria_selecionada,
-                                material_cat,
-                                qtd_item,
-                                valor_item,
-                            )
-                        st.success(f"{len(marcados)} item(ns) incluído(s) na requisição.")
+                        st.success(f"Incluído: {qtd_item}x {material_cat}")
                         st.rerun()
     else:
         if unidade_ok:
-            st.caption("Selecione a categoria para ver o catálogo e marcar os itens.")
+            st.caption("Selecione a categoria para ver o catálogo e incluir os itens.")
 
     # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
     if len(st.session_state.carrinho) > 0:
