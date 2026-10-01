@@ -2852,14 +2852,14 @@ if aba3 is not None:
                     categorias_cadastro.add(nome_cat)
         opcoes_cat_cadastro = sorted(categorias_cadastro, key=lambda x: x.casefold())
 
-        col_cat, col_est = st.columns(2)
+        col_cat, col_est = st.columns(2, gap="medium")
         with col_cat:
             st.markdown("##### Novo material")
             if not opcoes_cat_cadastro:
                 st.warning("Nenhuma categoria encontrada no catálogo. Inclua categorias na planilha para cadastrar materiais.")
             else:
+                cat_novo = st.selectbox("Categoria", opcoes_cat_cadastro, key="cad_sel_categoria")
                 with st.form("form_cadastro_material"):
-                    cat_novo = st.selectbox("Categoria", opcoes_cat_cadastro, key="cad_sel_categoria")
                     mat_novo = st.text_input("Nome do material")
                     preco_novo = st.number_input("Valor unitário (R$)", min_value=0.0, value=0.0, format="%.2f")
                     if st.form_submit_button("Cadastrar material"):
@@ -2878,71 +2878,6 @@ if aba3 is not None:
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Não foi possível cadastrar. Rode o SQL do SisPAC no Supabase se a tabela ainda não existir. ({e})")
-
-            df_lista_cad = df_materiais.copy() if df_materiais is not None else pd.DataFrame()
-            col_cat_lista, col_mat_lista, col_preco_lista = col_categoria, col_material, col_preco
-            if df_cat_banco.empty:
-                st.info("Ainda não há materiais só no banco. A lista abaixo é o catálogo (planilha), com estoque e valor.")
-            if df_lista_cad is None or df_lista_cad.empty:
-                pass
-            else:
-                st.markdown("**Materiais cadastrados**")
-                f_cat_b, f_nome_b = st.columns([1.15, 1.85])
-                with f_cat_b:
-                    filtro_cat_banco = st.selectbox(
-                        "Categoria",
-                        ["Todas"] + opcoes_cat_cadastro,
-                        key="filtro_cat_materiais_banco",
-                    )
-                with f_nome_b:
-                    filtro_mat_banco = st.text_input(
-                        "Buscar material cadastrado",
-                        key="filtro_materiais_cadastro",
-                        placeholder="Digite parte do nome",
-                    )
-                ativar_filtro_digitacao()
-                df_show_banco = df_lista_cad.copy()
-                col_cat_filtro = col_cat_lista if col_cat_lista in df_show_banco.columns else None
-                col_mat_filtro = col_mat_lista if col_mat_lista in df_show_banco.columns else None
-                if filtro_cat_banco != "Todas" and col_cat_filtro:
-                    df_show_banco = df_show_banco[
-                        df_show_banco[col_cat_filtro].astype(str).str.strip() == str(filtro_cat_banco).strip()
-                    ]
-                termo_banco = str(filtro_mat_banco or "").strip()
-                if termo_banco:
-                    if col_mat_filtro:
-                        mascara = df_show_banco[col_mat_filtro].astype(str).str.contains(
-                            termo_banco, case=False, regex=False, na=False
-                        )
-                        if col_cat_filtro:
-                            mascara = mascara | df_show_banco[col_cat_filtro].astype(str).str.contains(
-                                termo_banco, case=False, regex=False, na=False
-                            )
-                        df_show_banco = df_show_banco[mascara]
-                    else:
-                        mascara = False
-                        for col in df_show_banco.columns:
-                            mascara = mascara | df_show_banco[col].astype(str).str.contains(
-                                termo_banco, case=False, regex=False, na=False
-                            )
-                        df_show_banco = df_show_banco[mascara]
-                df_quadro = quadro_cadastro_estoque(
-                    df_show_banco,
-                    col_cat_lista,
-                    col_mat_lista,
-                    col_preco_lista,
-                    df_materiais,
-                    col_material,
-                    col_estoque,
-                    saidas_conferidas,
-                    saldos_lote,
-                    materiais_com_lote,
-                )
-                st.caption(f"Mostrando {len(df_quadro)} de {len(df_lista_cad)} material(is). Valor total = estoque atual × valor unitário.")
-                if df_quadro.empty:
-                    st.info("Nenhum material com esse filtro.")
-                else:
-                    st.dataframe(df_quadro, use_container_width=True, hide_index=True)
 
         with col_est:
             st.markdown("##### Entrada de lote")
@@ -2973,8 +2908,11 @@ if aba3 is not None:
                     nomes_catalogo if nomes_catalogo else ["Selecione a categoria primeiro"],
                 )
                 lote_input = st.text_input("Lote")
-                validade_input = st.date_input("Validade", value=date.today())
-                qtd_entrada = st.number_input("Quantidade", min_value=1, value=1)
+                c_val, c_qtd = st.columns(2)
+                with c_val:
+                    validade_input = st.date_input("Validade", value=date.today())
+                with c_qtd:
+                    qtd_entrada = st.number_input("Quantidade", min_value=1, value=1)
                 fornecedor_input = st.text_input("Fornecedor (opcional)")
                 if st.form_submit_button("Registrar entrada"):
                     if material_lote in MATERIAIS_INVALIDOS or material_lote == "Selecione a categoria primeiro" or not lote_input.strip():
@@ -3008,6 +2946,72 @@ if aba3 is not None:
                                     st.error(f"Erro ao registrar lote: {e2}")
                             else:
                                 st.error(f"Erro ao registrar lote: {e}")
+
+        st.markdown("---")
+        df_lista_cad = df_materiais.copy() if df_materiais is not None else pd.DataFrame()
+        col_cat_lista, col_mat_lista, col_preco_lista = col_categoria, col_material, col_preco
+        if df_cat_banco.empty:
+            st.info("Ainda não há materiais só no banco. A lista abaixo é o catálogo (planilha), com estoque e valor.")
+        if df_lista_cad is None or df_lista_cad.empty:
+            pass
+        else:
+            st.markdown("##### Materiais cadastrados")
+            f_cat_b, f_nome_b = st.columns(2, gap="medium")
+            with f_cat_b:
+                filtro_cat_banco = st.selectbox(
+                    "Categoria",
+                    ["Todas"] + opcoes_cat_cadastro,
+                    key="filtro_cat_materiais_banco",
+                )
+            with f_nome_b:
+                filtro_mat_banco = st.text_input(
+                    "Buscar material cadastrado",
+                    key="filtro_materiais_cadastro",
+                    placeholder="Digite parte do nome",
+                )
+            ativar_filtro_digitacao()
+            df_show_banco = df_lista_cad.copy()
+            col_cat_filtro = col_cat_lista if col_cat_lista in df_show_banco.columns else None
+            col_mat_filtro = col_mat_lista if col_mat_lista in df_show_banco.columns else None
+            if filtro_cat_banco != "Todas" and col_cat_filtro:
+                df_show_banco = df_show_banco[
+                    df_show_banco[col_cat_filtro].astype(str).str.strip() == str(filtro_cat_banco).strip()
+                ]
+            termo_banco = str(filtro_mat_banco or "").strip()
+            if termo_banco:
+                if col_mat_filtro:
+                    mascara = df_show_banco[col_mat_filtro].astype(str).str.contains(
+                        termo_banco, case=False, regex=False, na=False
+                    )
+                    if col_cat_filtro:
+                        mascara = mascara | df_show_banco[col_cat_filtro].astype(str).str.contains(
+                            termo_banco, case=False, regex=False, na=False
+                        )
+                    df_show_banco = df_show_banco[mascara]
+                else:
+                    mascara = False
+                    for col in df_show_banco.columns:
+                        mascara = mascara | df_show_banco[col].astype(str).str.contains(
+                            termo_banco, case=False, regex=False, na=False
+                        )
+                    df_show_banco = df_show_banco[mascara]
+            df_quadro = quadro_cadastro_estoque(
+                df_show_banco,
+                col_cat_lista,
+                col_mat_lista,
+                col_preco_lista,
+                df_materiais,
+                col_material,
+                col_estoque,
+                saidas_conferidas,
+                saldos_lote,
+                materiais_com_lote,
+            )
+            st.caption(f"Mostrando {len(df_quadro)} de {len(df_lista_cad)} material(is). Valor total = estoque atual × valor unitário.")
+            if df_quadro.empty:
+                st.info("Nenhum material com esse filtro.")
+            else:
+                st.dataframe(df_quadro, use_container_width=True, hide_index=True)
 
         st.markdown("##### Lotes no estoque central")
         try:
