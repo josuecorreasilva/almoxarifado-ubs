@@ -1860,6 +1860,83 @@ with aba1:
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
 
+    if unidade_ok:
+        st.markdown("##### Itens da requisição")
+        if len(st.session_state.carrinho) == 0:
+            st.caption("Nenhum item ainda. Inclua no catálogo abaixo — a lista fica aqui em cima, sem precisar rolar os 300 itens.")
+        elif st.session_state.perfil == "UBS":
+            col_cab1, col_cab2, col_cab3 = st.columns([5.2, 1, 0.6])
+            col_cab1.write("**Item**")
+            col_cab2.write("**Qtd**")
+            col_cab3.write("")
+            st.divider()
+            for i, item in enumerate(st.session_state.carrinho):
+                c1, c2, c3 = st.columns([5.2, 1, 0.6])
+                c1.write(item["material"])
+                c2.write(str(item["quantidade"]))
+                if c3.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
+                    st.session_state.carrinho.pop(i)
+                    st.rerun()
+        else:
+            col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.55])
+            col_cab1.write("**UBS**")
+            col_cab2.write("**Categoria**")
+            col_cab3.write("**Material**")
+            col_cab4.write("**Qtd**")
+            col_cab5.write("")
+            st.divider()
+            for i, item in enumerate(st.session_state.carrinho):
+                c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.55])
+                c1.write(item["ubs"])
+                c2.write(item["categoria"])
+                c3.write(item["material"])
+                c4.write(item["quantidade"])
+                if c5.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
+                    st.session_state.carrinho.pop(i)
+                    st.rerun()
+
+        observacao_geral = st.text_area(
+            "Observações (opcional)",
+            placeholder="Informe urgência, horário de recebimento ou outras orientações à gestão.",
+            key="input_observacao_geral",
+        )
+        if st.button("Enviar requisição", type="primary", key="btn_enviar_pedido"):
+            if not unidade_ok:
+                st.warning("Selecione o distrito e a unidade antes de enviar.")
+            elif not st.session_state.carrinho:
+                st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
+            elif not supabase:
+                st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
+            else:
+                numero_pedido = proximo_numero_pedido(ubs_selecionada)
+                data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                obs_limpa = observacao_geral.strip() if observacao_geral else ""
+                texto_observacao = obs_limpa if obs_limpa else "Sem observação"
+                with st.spinner("Salvando pedido no servidor..."):
+                    lista_insercao = []
+                    for item in st.session_state.carrinho:
+                        lista_insercao.append({
+                            "numero_pedido": numero_pedido,
+                            "data": data_pedido,
+                            "distrito": item["distrito"],
+                            "ubs": item["ubs"],
+                            "categoria": item["categoria"],
+                            "material": item["material"],
+                            "quantidade": item["quantidade"],
+                            "valor_unitario": item.get("valor_unitario", 0.0),
+                            "custo_total": item.get("subtotal", 0.0),
+                            "observacao": texto_observacao,
+                            "status": "Pedido enviado",
+                        })
+                    try:
+                        supabase.table("pedidos").insert(lista_insercao).execute()
+                        st.session_state.carrinho = []
+                        st.session_state.msg_pedido_ok = f"✅ Pedido {numero_pedido} enviado com sucesso!"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
+        st.markdown("---")
+
     if not unidade_ok:
         st.info("Selecione o distrito e a unidade antes de montar o pedido.")
     elif (
@@ -1921,85 +1998,6 @@ with aba1:
     else:
         if unidade_ok:
             st.caption("Selecione a categoria para ver o catálogo e incluir os itens.")
-
-    # --- RESUMO DO CARRINHO (Sem exibição de preços para a UBS) ---
-    if len(st.session_state.carrinho) > 0:
-        st.markdown("##### Itens da requisição")
-        if st.session_state.perfil == "UBS":
-            col_cab1, col_cab2, col_cab3 = st.columns([5.2, 1, 0.6])
-            col_cab1.write("**Item**")
-            col_cab2.write("**Qtd**")
-            col_cab3.write("")
-            st.divider()
-            for i, item in enumerate(st.session_state.carrinho):
-                c1, c2, c3 = st.columns([5.2, 1, 0.6])
-                c1.write(item["material"])
-                c2.write(str(item["quantidade"]))
-                if c3.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
-                    st.session_state.carrinho.pop(i)
-                    st.rerun()
-        else:
-            col_cab1, col_cab2, col_cab3, col_cab4, col_cab5 = st.columns([1.5, 2, 3, 1, 0.55])
-            col_cab1.write("**UBS**")
-            col_cab2.write("**Categoria**")
-            col_cab3.write("**Material**")
-            col_cab4.write("**Qtd**")
-            col_cab5.write("")
-            st.divider()
-            for i, item in enumerate(st.session_state.carrinho):
-                c1, c2, c3, c4, c5 = st.columns([1.5, 2, 3, 1, 0.55])
-                c1.write(item["ubs"])
-                c2.write(item["categoria"])
-                c3.write(item["material"])
-                c4.write(item["quantidade"])
-                if c5.button("🗑️", help="Remover item", key=f"excluir_{i}_{item['material']}"):
-                    st.session_state.carrinho.pop(i)
-                    st.rerun()
-
-    observacao_geral = st.text_area(
-        "Observações (opcional)", 
-        placeholder="Informe urgência, horário de recebimento ou outras orientações à gestão.",
-        key="input_observacao_geral"
-    )
-
-    if st.button("Enviar requisição", type="primary", key="btn_enviar_pedido"):
-        if not unidade_ok:
-            st.warning("Selecione o distrito e a unidade antes de enviar.")
-        elif not st.session_state.carrinho:
-            st.warning("⚠️ O carrinho está vazio! Adicione pelo menos um item antes de enviar.")
-        elif not supabase:
-            st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
-        else:
-            numero_pedido = proximo_numero_pedido(ubs_selecionada)
-            data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            obs_limpa = observacao_geral.strip() if observacao_geral else ""
-            texto_observacao = obs_limpa if obs_limpa else "Sem observação"
-
-            with st.spinner('Salvando pedido no servidor...'):
-                lista_insercao = []
-                for item in st.session_state.carrinho:
-                    lista_insercao.append({
-                        "numero_pedido": numero_pedido,
-                        "data": data_pedido,
-                        "distrito": item["distrito"],
-                        "ubs": item["ubs"],
-                        "categoria": item["categoria"],
-                        "material": item["material"],
-                        "quantidade": item["quantidade"],
-                        "valor_unitario": item.get("valor_unitario", 0.0),
-                        "custo_total": item.get("subtotal", 0.0),
-                        "observacao": texto_observacao,
-                        "status": "Pedido enviado"
-                    })
-
-                try:
-                    response = supabase.table("pedidos").insert(lista_insercao).execute()
-                    st.session_state.carrinho = []
-                    st.session_state.msg_pedido_ok = f"✅ Pedido {numero_pedido} enviado com sucesso!"
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
