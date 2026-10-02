@@ -3840,21 +3840,29 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                         if df_rel.empty:
                             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
                         else:
+                            df_rel = df_rel.copy()
+                            datas_lista = pd.to_datetime(df_rel["data_dt"], errors="coerce")
+                            df_rel["_dia"] = datas_lista.dt.date
                             if tipo_relatorio == "Geral (Consolidado)":
                                 st.write(f"**Consolidado Geral (Solicitado vs Entregue) - Escopo: {ubs_escolhida} ({rotulo_periodo})**")
                                 
                                 if st.session_state.perfil == "GESTAO":
-                                    df_consolidado = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "quantidade_entregue": "sum", "custo_total": "sum"}).reset_index()
-                                    df_consolidado.columns = ["Categoria", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo"]
+                                    df_consolidado = df_rel.groupby(["_dia", "categoria", "material"], dropna=False).agg({"quantidade": "sum", "quantidade_entregue": "sum", "custo_total": "sum"}).reset_index()
+                                    df_consolidado.columns = ["_dia", "Categoria", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo"]
                                     df_consolidado["Custo Efetivo (R$)"] = df_consolidado["Custo Efetivo"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-                                    df_exibicao = df_consolidado[["Categoria", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo (R$)"]]
+                                    df_consolidado["Data"] = df_consolidado["_dia"].map(formatar_data_br)
+                                    df_exibicao = df_consolidado.sort_values(by=["_dia", "Categoria", "Material"])[
+                                        ["Data", "Categoria", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo (R$)"]
+                                    ]
                                 else:
-                                    df_exibicao = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
-                                    df_exibicao.columns = ["Categoria", "Material", "Qtd Solicitada", "Qtd Entregue"]
-                                if periodo == "Data específica" and data_analitico:
-                                    df_exibicao.insert(0, "Data", formatar_data_br(data_analitico))
+                                    df_exibicao = df_rel.groupby(["_dia", "categoria", "material"], dropna=False).agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
+                                    df_exibicao.columns = ["_dia", "Categoria", "Material", "Qtd Solicitada", "Qtd Entregue"]
+                                    df_exibicao["Data"] = df_exibicao["_dia"].map(formatar_data_br)
+                                    df_exibicao = df_exibicao.sort_values(by=["_dia", "Categoria", "Material"])[
+                                        ["Data", "Categoria", "Material", "Qtd Solicitada", "Qtd Entregue"]
+                                    ]
                                 
-                                st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+                                st.dataframe(df_exibicao, use_container_width=True, hide_index=True, column_order=list(df_exibicao.columns))
                                 
                                 st.markdown("#### 📊 Comparativo Gráfico: Solicitado vs Entregue")
                                 df_grafico = df_rel.groupby("material")[["quantidade", "quantidade_entregue"]].sum()
@@ -3871,18 +3879,23 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                                 df_cat_filtrado = df_rel[df_rel["categoria"] == cat_escolhida]
                                 
                                 if st.session_state.perfil == "GESTAO":
-                                    df_cat_cons = df_cat_filtrado.groupby("material").agg({"quantidade": "sum", "quantidade_entregue": "sum", "custo_total": "sum"}).reset_index()
-                                    df_cat_cons.columns = ["Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo"]
+                                    df_cat_cons = df_cat_filtrado.groupby(["_dia", "material"], dropna=False).agg({"quantidade": "sum", "quantidade_entregue": "sum", "custo_total": "sum"}).reset_index()
+                                    df_cat_cons.columns = ["_dia", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo"]
                                     df_cat_cons["Custo Efetivo (R$)"] = df_cat_cons["Custo Efetivo"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-                                    df_cat_ex = df_cat_cons[["Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo (R$)"]]
+                                    df_cat_cons["Data"] = df_cat_cons["_dia"].map(formatar_data_br)
+                                    df_cat_ex = df_cat_cons.sort_values(by=["_dia", "Material"])[
+                                        ["Data", "Material", "Qtd Solicitada", "Qtd Entregue", "Custo Efetivo (R$)"]
+                                    ]
                                 else:
-                                    df_cat_ex = df_cat_filtrado.groupby("material").agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
-                                    df_cat_ex.columns = ["Material", "Qtd Solicitada", "Qtd Entregue"]
+                                    df_cat_ex = df_cat_filtrado.groupby(["_dia", "material"], dropna=False).agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
+                                    df_cat_ex.columns = ["_dia", "Material", "Qtd Solicitada", "Qtd Entregue"]
+                                    df_cat_ex["Data"] = df_cat_ex["_dia"].map(formatar_data_br)
+                                    df_cat_ex = df_cat_ex.sort_values(by=["_dia", "Material"])[
+                                        ["Data", "Material", "Qtd Solicitada", "Qtd Entregue"]
+                                    ]
                                 
                                 st.write(f"**Consolidado da Categoria: {cat_escolhida} | Escopo: {ubs_escolhida} ({rotulo_periodo})**")
-                                if periodo == "Data específica" and data_analitico:
-                                    df_cat_ex.insert(0, "Data", formatar_data_br(data_analitico))
-                                st.dataframe(df_cat_ex, use_container_width=True, hide_index=True)
+                                st.dataframe(df_cat_ex, use_container_width=True, hide_index=True, column_order=list(df_cat_ex.columns))
                                 
                                 st.markdown(f"#### 📊 Gráfico Comparativo - {cat_escolhida}")
                                 df_grafico_cat = df_cat_filtrado.groupby("material")[["quantidade", "quantidade_entregue"]].sum()
