@@ -419,19 +419,71 @@ st.markdown("""
         font-weight: 500 !important;
     }
     .st-key-catalogo_lista {
-        border: 1px solid #d5e4e6;
-        border-radius: 8px;
-        padding: 2px 8px 6px 8px;
-        background: #fbfefe;
+        border: 1px solid #d5d8dc;
+        border-radius: 6px;
+        padding: 0;
+        background: #fff;
+    }
+    .st-key-catalogo_lista [data-testid="stVerticalBlock"] {
+        gap: 0 !important;
     }
     .st-key-catalogo_lista [data-testid="stHorizontalBlock"] {
-        min-height: 2.55rem;
+        gap: 0.35rem !important;
+        align-items: center !important;
+        min-height: 28px !important;
+        margin: 0 !important;
+        padding: 0 6px !important;
+        border-bottom: 1px solid #d5d8dc !important;
+        width: 100% !important;
+    }
+    .st-key-catalogo_lista [data-testid="stColumn"],
+    .st-key-catalogo_lista [data-testid="column"] {
+        align-items: center !important;
+        padding: 0 !important;
+    }
+    .st-key-catalogo_lista p {
+        margin: 0 !important;
+        font-size: 0.84rem !important;
+        line-height: 1.25 !important;
+    }
+    .st-key-catalogo_lista [data-testid="stMarkdown"],
+    .st-key-catalogo_lista [data-testid="stMarkdownContainer"],
+    .st-key-catalogo_lista [data-testid="stElementContainer"] {
+        width: 100% !important;
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    .linha-catalogo {
+        display: flex;
         align-items: center;
+        min-height: 26px;
+        padding: 3px 4px;
+        font-size: 0.84rem;
+        line-height: 1.25;
+        color: #1c2833;
+    }
+    .linha-catalogo-cab {
+        font-weight: 700;
+        color: #2c3e50;
+        background: #f4f6f7;
+    }
+    .st-key-catalogo_lista [data-testid="stNumberInput"] {
+        max-width: 78px;
+    }
+    .st-key-catalogo_lista [data-testid="stNumberInput"] input {
+        font-size: 0.82rem !important;
+        font-weight: 600;
+        text-align: center;
+        min-height: 26px !important;
+        height: 26px !important;
+        padding-top: 0.08rem !important;
+        padding-bottom: 0.08rem !important;
     }
     .st-key-catalogo_lista div.stButton > button {
-        padding: 0.2rem 0.55rem !important;
-        min-height: 0 !important;
-        font-size: 0.82rem !important;
+        padding: 0.1rem 0.4rem !important;
+        min-height: 26px !important;
+        height: 26px !important;
+        font-size: 0.78rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -2870,17 +2922,20 @@ if secao_gestao in (None, "Novo pedido"):
             if df_filtrado.empty:
                 st.info("Nenhum material nesta categoria com o filtro atual.")
             else:
-                cab_item, cab_qtd, cab_btn = st.columns([4.4, 0.9, 1.2])
-                cab_item.markdown("**Item**")
-                cab_qtd.markdown("**Qtd**")
-                cab_btn.write("")
-                with st.container(height=460, key="catalogo_lista"):
+                with st.container(height=320, key="catalogo_lista"):
+                    cab_item, cab_qtd, cab_btn = st.columns([4.4, 0.9, 1.2])
+                    cab_item.markdown("<div class='linha-catalogo linha-catalogo-cab'>Item</div>", unsafe_allow_html=True)
+                    cab_qtd.markdown("<div class='linha-catalogo linha-catalogo-cab'>Qtd</div>", unsafe_allow_html=True)
+                    cab_btn.markdown("<div class='linha-catalogo linha-catalogo-cab'></div>", unsafe_allow_html=True)
                     for _, item_row in df_filtrado.iterrows():
                         material_cat = str(item_row[col_material]).strip()
                         valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
                         chave_mat = re.sub(r"\W+", "_", material_cat)[:80]
                         c_item, c_qtd, c_btn = st.columns([4.4, 0.9, 1.2])
-                        c_item.write(material_cat)
+                        c_item.markdown(
+                            f"<div class='linha-catalogo'>{html_seguro(material_cat)}</div>",
+                            unsafe_allow_html=True,
+                        )
                         qtd_item = c_qtd.number_input(
                             "Qtd",
                             min_value=1,
