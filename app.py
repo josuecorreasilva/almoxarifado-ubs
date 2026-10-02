@@ -2888,30 +2888,37 @@ with col_titulo:
     )
 
 if st.session_state.perfil == "GESTAO":
-    atual_secao = st.session_state.get("secao_gestao")
-    if atual_secao in {"Relatórios", "Cadastro e estoque", "Empenhos e notas"}:
-        st.session_state.secao_gerencial = atual_secao
-        st.session_state.secao_gestao = "Painel gerencial"
-    elif atual_secao == "Painel gerencial" and not st.session_state.get("secao_gerencial"):
-        st.session_state.secao_gestao = "Pedidos"
+    opcoes_topo = ["Novo pedido", "Pedidos", "Painel gerencial"]
+    opcoes_gerencial = ["Relatórios", "Cadastro e estoque", "Empenhos e notas"]
     st.session_state.pop("em_relatorios", None)
+    if "secao_topo_gestao" not in st.session_state:
+        antiga = st.session_state.get("secao_gestao")
+        if antiga in opcoes_gerencial:
+            st.session_state.secao_topo_gestao = "Painel gerencial"
+            st.session_state.secao_gerencial_area = antiga
+        elif antiga in opcoes_topo:
+            st.session_state.secao_topo_gestao = antiga
+        else:
+            st.session_state.secao_topo_gestao = "Pedidos"
+    if st.session_state.get("secao_gerencial_area") not in opcoes_gerencial:
+        st.session_state.secao_gerencial_area = "Relatórios"
     secao_topo = st.radio(
         "Seção",
-        ["Novo pedido", "Pedidos", "Painel gerencial"],
+        opcoes_topo,
         horizontal=True,
-        key="secao_gestao",
+        key="secao_topo_gestao",
     )
-    secao_gerencial = None
     if secao_topo == "Painel gerencial":
+        if st.session_state.get("radio_secao_gerencial") not in opcoes_gerencial:
+            st.session_state.radio_secao_gerencial = st.session_state.secao_gerencial_area
         secao_gerencial = st.radio(
             "Painel gerencial",
-            ["Relatórios", "Cadastro e estoque", "Empenhos e notas"],
+            opcoes_gerencial,
             horizontal=True,
-            key="secao_gerencial",
+            key="radio_secao_gerencial",
         )
+        st.session_state.secao_gerencial_area = secao_gerencial
         secao_gestao = secao_gerencial
-    elif secao_topo == "Pedidos":
-        secao_gestao = "Pedidos"
     else:
         secao_gestao = secao_topo
     aba1 = aba2 = aba3 = aba4 = None
