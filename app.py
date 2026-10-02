@@ -28,7 +28,7 @@ st.set_page_config(page_title="SisPAC — SMS Pelotas", page_icon="🏥", layout
 st.markdown("""
     <style>
     @media print {
-        @page { size: A4; margin: 10mm; }
+        @page { size: A4; margin: 10mm 10mm 16mm 10mm; }
         html, body {
             background: white !important;
             height: auto !important;
@@ -51,7 +51,11 @@ st.markdown("""
         [data-testid="stCheckbox"],
         [data-testid="stTextInput"],
         [data-testid="stNumberInput"],
-        [data-testid="stCaption"] {
+        [data-testid="stCaption"],
+        footer,
+        [data-testid="stStatusWidget"],
+        .stAppDeployButton,
+        [data-testid="stHeaderActionElements"] {
             display: none !important;
         }
         *:has(.area-impressao) {
@@ -82,7 +86,21 @@ st.markdown("""
         .area-impressao th, .area-impressao td { display: table-cell !important; }
         .bloco-assinaturas { display: flex !important; }
         .campo-assinatura, .campo-assinatura .linha { display: block !important; }
+        .rodape-impressao {
+            display: block !important;
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            visibility: visible !important;
+            font-size: 10px !important;
+            color: #222 !important;
+            text-align: left !important;
+            padding: 0 10mm 4mm 10mm !important;
+            background: transparent !important;
+        }
     }
+    .rodape-impressao { display: none; }
     .area-impressao table {
         width: 100%;
         border-collapse: collapse;
@@ -126,6 +144,18 @@ st.markdown("""
     [data-testid="stSidebarNav"],
     [data-testid="stSidebarNavItems"],
     [data-testid="stSidebarNavSeparator"] {
+        display: none !important;
+    }
+    footer,
+    [data-testid="stStatusWidget"],
+    .stAppDeployButton,
+    [data-testid="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    [data-testid="stHeaderActionElements"],
+    [data-testid="stHeadingWithActionElements"] a,
+    .stMarkdown a[href^="#"] {
         display: none !important;
     }
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
@@ -715,6 +745,18 @@ def render_iframe_impressao():
   }} catch (e3) {{}}
   setTimeout(function() {{
     try {{
+      var oldTitle = alvo.document.title;
+      alvo.document.title = "SisPAC";
+      try {{
+        if (alvo.history && alvo.history.replaceState) {{
+          alvo.history.replaceState(null, "", alvo.location.pathname + alvo.location.search);
+        }}
+      }} catch (eHash) {{}}
+      var restaurar = function() {{
+        try {{ alvo.document.title = oldTitle; }} catch (eT) {{}}
+        try {{ alvo.removeEventListener("afterprint", restaurar); }} catch (eL) {{}}
+      }};
+      try {{ alvo.addEventListener("afterprint", restaurar); }} catch (eA) {{}}
       alvo.focus();
       alvo.print();
     }} catch (e4) {{
@@ -964,6 +1006,11 @@ AVISO_PARCIAL = (
     "Quantitativo solicitado riscado: a diferença não será enviada depois. "
     "Vale somente a quantidade entregue."
 )
+RODAPE_IMPRESSAO = "https://pedidos-ubs-pelotas"
+
+
+def html_rodape_impressao():
+    return f"<div class='rodape-impressao'>{html_seguro(RODAPE_IMPRESSAO)}</div>"
 
 
 def linhas_comprovante(detalhes, status_atual, sem_custo=True):
@@ -1021,7 +1068,7 @@ if FPDF_DISPONIVEL:
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 8)
-            self.cell(0, 6, texto_pdf(f"SisPAC - pagina {self.page_no()}"), align="C")
+            self.cell(0, 6, texto_pdf(RODAPE_IMPRESSAO), align="L")
 else:
     class PdfSisPAC:
         pass
@@ -1413,6 +1460,7 @@ def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
     <p><b>Status:</b> {html_seguro(status_atual)}</p>
     {meio}
     {assinaturas}
+    {html_rodape_impressao()}
     </div>
     """).strip()
 
@@ -2353,7 +2401,7 @@ def render_painel_empenhos(usuario_atual):
                             st.error(f"Não foi possível registrar o empenho: {e}")
 
     with col_nf:
-        st.markdown("##### Nota fiscal do empenho")
+        st.markdown("<h5 style='margin:0.15rem 0 0.3rem 0;'>Nota fiscal do empenho</h5>", unsafe_allow_html=True)
         if df_empenhos.empty:
             st.info("Cadastre um empenho ao lado para lançar as notas nele.")
         else:
@@ -2840,9 +2888,12 @@ with col_titulo:
     )
 
 if st.session_state.perfil == "GESTAO":
+    if st.session_state.get("em_relatorios") and st.session_state.get("secao_gestao") == "Painel gerencial":
+        st.session_state.secao_gestao = "Relatórios"
+        st.session_state.em_relatorios = False
     secao_gestao = st.radio(
         "Seção",
-        ["Novo pedido", "Painel gerencial", "Cadastro e estoque", "Empenhos e notas"],
+        ["Novo pedido", "Painel gerencial", "Relatórios", "Cadastro e estoque", "Empenhos e notas"],
         horizontal=True,
         key="secao_gestao",
     )
@@ -3108,12 +3159,18 @@ if secao_gestao in (None, "Novo pedido"):
                         st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
-if secao_gestao in (None, "Painel gerencial"):
+if secao_gestao in (None, "Painel gerencial", "Relatórios"):
   with ctx_painel:
-    if st.session_state.perfil == "GESTAO":
+    if st.session_state.perfil == "GESTAO" and secao_gestao == "Relatórios":
+        st.markdown(
+            "<div class='nao-imprimir'><h4>Relatórios</h4>"
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Painel analítico, documento oficial e centro de custos. Os pedidos ficam no Painel gerencial.</p></div>",
+            unsafe_allow_html=True,
+        )
+    elif st.session_state.perfil == "GESTAO":
         st.markdown(
             "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Conferência na ordem de chegada. Relatórios abrem em tela própria.</p></div>",
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Conferência, despacho e acompanhamento dos pedidos.</p></div>",
             unsafe_allow_html=True,
         )
     else:
@@ -3156,33 +3213,15 @@ if secao_gestao in (None, "Painel gerencial"):
                 if df_supabase.empty:
                     st.warning("Não há registros de pedidos para esta unidade até o momento.")
                 else:
-                    if st.session_state.perfil == "GESTAO":
-                        if "em_relatorios" not in st.session_state:
-                            st.session_state.em_relatorios = False
-                        if st.session_state.em_relatorios:
-                            if st.button("← Voltar ao painel", key="btn_voltar_painel"):
-                                st.session_state.em_relatorios = False
-                                st.rerun()
-                            st.markdown("#### Relatórios")
-                            st.caption("Painel analítico: gráficos do dia a dia. Documento oficial: PDF para assinatura. Centro de custos: valores efetivamente despachados.")
-                            sub_relatorio = st.radio(
-                                "Tipo de relatório",
-                                ["Painel analítico", "Documento oficial", "Centro de custos"],
-                                horizontal=True,
-                                key="tipo_relatorio_pagina",
-                            )
-                            modo_aba2 = "Relatórios"
-                        else:
-                            modo_aba2 = st.radio(
-                                "Área",
-                                ["Pedidos e conferência", "Relatórios"],
-                                horizontal=True,
-                                key="radio_area_painel",
-                            )
-                            sub_relatorio = None
-                            if modo_aba2 == "Relatórios":
-                                st.session_state.em_relatorios = True
-                                st.rerun()
+                    if st.session_state.perfil == "GESTAO" and secao_gestao == "Relatórios":
+                        st.caption("Painel analítico: gráficos do dia a dia. Documento oficial: PDF para assinatura. Centro de custos: valores efetivamente despachados.")
+                        sub_relatorio = st.radio(
+                            "Tipo de relatório",
+                            ["Painel analítico", "Documento oficial", "Centro de custos"],
+                            horizontal=True,
+                            key="tipo_relatorio_pagina",
+                        )
+                        modo_aba2 = "Relatórios"
                     else:
                         modo_aba2 = "Pedidos e conferência"
                         sub_relatorio = None
@@ -3990,6 +4029,7 @@ if secao_gestao in (None, "Painel gerencial"):
                                     "Ciência da unidade",
                                     "Assinatura do responsável",
                                 )}
+                                {html_rodape_impressao()}
                             </div>
                             """
                             st.markdown(textwrap.dedent(html_relatorio).strip(), unsafe_allow_html=True)
