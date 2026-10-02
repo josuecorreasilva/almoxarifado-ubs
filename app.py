@@ -3395,6 +3395,9 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                         )
 
                         if pedido_selecionado == "Selecione...":
+                            aviso_lista = st.session_state.pop("aviso_lista_pedidos", None)
+                            if aviso_lista:
+                                st.success(aviso_lista)
                             filtro_status = tipo_lista
                             if so_despacho and st.session_state.perfil == "GESTAO":
                                 st.caption("Aqui ficam os pedidos já conferidos. Imprima e depois registre a saída para entrega. O estoque só baixa nessa saída.")
@@ -3671,12 +3674,14 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                 if st.button("Registrar saída para entrega", type="primary", key=f"btn_despachar_{pedido_selecionado}"):
                                     try:
                                         despachar_pedido(pedido_selecionado)
-                                        st.success("Pedido em trânsito. Estoque central baixado. Aguardando confirmação da UBS.")
+                                        st.session_state.aviso_lista_pedidos = (
+                                            f"Pedido {pedido_selecionado} em trânsito. Estoque central baixado. Aguardando a UBS confirmar."
+                                        )
                                         st.session_state._ir_lista_pedidos = rotulo_lista_por_status(
                                             STATUS_TRANSITO, st.session_state.perfil, opcoes_lista_ped
                                         )
-                                        st.session_state.pedido_aberto = pedido_selecionado
-                                        st.session_state.modo_abertura = "visualizar"
+                                        st.session_state.pedido_aberto = None
+                                        st.session_state.modo_abertura = None
                                         st.rerun()
                                     except Exception as e:
                                         st.error(str(e))
