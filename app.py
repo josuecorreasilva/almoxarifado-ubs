@@ -268,6 +268,21 @@ st.markdown("""
         cursor: pointer !important;
         font-weight: 500 !important;
     }
+    .st-key-catalogo_lista {
+        border: 1px solid #d5e4e6;
+        border-radius: 8px;
+        padding: 2px 8px 6px 8px;
+        background: #fbfefe;
+    }
+    .st-key-catalogo_lista [data-testid="stHorizontalBlock"] {
+        min-height: 2.55rem;
+        align-items: center;
+    }
+    .st-key-catalogo_lista div.stButton > button {
+        padding: 0.2rem 0.55rem !important;
+        min-height: 0 !important;
+        font-size: 0.82rem !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -1860,10 +1875,74 @@ with aba1:
     if 'carrinho' not in st.session_state:
         st.session_state.carrinho = []
 
+    if not unidade_ok:
+        st.info("Selecione o distrito e a unidade antes de montar o pedido.")
+    elif (
+        not df_materiais.empty
+        and col_categoria
+        and col_material
+        and categoria_selecionada not in MATERIAIS_INVALIDOS
+    ):
+        df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada].copy()
+        df_filtrado[col_material] = df_filtrado[col_material].astype(str).str.strip()
+        df_filtrado = df_filtrado[~df_filtrado[col_material].isin(MATERIAIS_INVALIDOS)]
+        df_filtrado = df_filtrado.drop_duplicates(subset=[col_material], keep="first")
+
+        with st.container(key="catalogo_marcacao"):
+            st.markdown("##### Catálogo da categoria")
+            st.caption("Informe a quantidade e clique em Incluir. O catálogo mostra até 10 itens; o restante fica na rolagem desta lista.")
+            filtro_nome = st.text_input(
+                "Filtrar pelo nome do material",
+                key="filtro_nome_catalogo",
+                placeholder="Comece a digitar o nome do item",
+            )
+            ativar_filtro_digitacao()
+            filtro_nome = str(filtro_nome or "")
+            if filtro_nome.strip():
+                df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
+
+            if df_filtrado.empty:
+                st.info("Nenhum material nesta categoria com o filtro atual.")
+            else:
+                cab_item, cab_qtd, cab_btn = st.columns([4.4, 0.9, 1.2])
+                cab_item.markdown("**Item**")
+                cab_qtd.markdown("**Qtd**")
+                cab_btn.write("")
+                with st.container(height=460, key="catalogo_lista"):
+                    for _, item_row in df_filtrado.iterrows():
+                        material_cat = str(item_row[col_material]).strip()
+                        valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
+                        chave_mat = re.sub(r"\W+", "_", material_cat)[:80]
+                        c_item, c_qtd, c_btn = st.columns([4.4, 0.9, 1.2])
+                        c_item.write(material_cat)
+                        qtd_item = c_qtd.number_input(
+                            "Qtd",
+                            min_value=1,
+                            value=1,
+                            step=1,
+                            key=f"pedido_qtd_{categoria_selecionada}_{chave_mat}",
+                            label_visibility="collapsed",
+                        )
+                        if c_btn.button("Incluir", key=f"pedido_add_{categoria_selecionada}_{chave_mat}"):
+                            incluir_item_carrinho(
+                                distrito_selecionado,
+                                ubs_selecionada,
+                                categoria_selecionada,
+                                material_cat,
+                                qtd_item,
+                                valor_item,
+                            )
+                            st.success(f"Incluído: {qtd_item}x {material_cat}")
+                            st.rerun()
+    else:
+        if unidade_ok:
+            st.caption("Selecione a categoria para ver o catálogo e incluir os itens.")
+
     if unidade_ok:
+        st.markdown("---")
         st.markdown("##### Itens da requisição")
         if len(st.session_state.carrinho) == 0:
-            st.caption("Nenhum item ainda. Inclua no catálogo abaixo — a lista fica aqui em cima, sem precisar rolar os 300 itens.")
+            st.caption("Nenhum item ainda. Inclua no catálogo acima.")
         elif st.session_state.perfil == "UBS":
             col_cab1, col_cab2, col_cab3 = st.columns([5.2, 1, 0.6])
             col_cab1.write("**Item**")
@@ -1935,69 +2014,6 @@ with aba1:
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
-        st.markdown("---")
-
-    if not unidade_ok:
-        st.info("Selecione o distrito e a unidade antes de montar o pedido.")
-    elif (
-        not df_materiais.empty
-        and col_categoria
-        and col_material
-        and categoria_selecionada not in MATERIAIS_INVALIDOS
-    ):
-        df_filtrado = df_materiais[df_materiais[col_categoria] == categoria_selecionada].copy()
-        df_filtrado[col_material] = df_filtrado[col_material].astype(str).str.strip()
-        df_filtrado = df_filtrado[~df_filtrado[col_material].isin(MATERIAIS_INVALIDOS)]
-        df_filtrado = df_filtrado.drop_duplicates(subset=[col_material], keep="first")
-
-        with st.container(key="catalogo_marcacao"):
-            st.markdown("##### Catálogo da categoria")
-            st.caption("Informe a quantidade e clique em Incluir. O item entra na requisição. Trocar a categoria ou o filtro não muda o que já foi adicionado.")
-            filtro_nome = st.text_input(
-                "Filtrar pelo nome do material",
-                key="filtro_nome_catalogo",
-                placeholder="Comece a digitar o nome do item",
-            )
-            ativar_filtro_digitacao()
-            filtro_nome = str(filtro_nome or "")
-            if filtro_nome.strip():
-                df_filtrado = df_filtrado[df_filtrado[col_material].str.contains(filtro_nome.strip(), case=False, regex=False, na=False)]
-
-            if df_filtrado.empty:
-                st.info("Nenhum material nesta categoria com o filtro atual.")
-            else:
-                cab_item, cab_qtd, cab_btn = st.columns([4.4, 0.9, 1.2])
-                cab_item.markdown("**Item**")
-                cab_qtd.markdown("**Qtd**")
-                cab_btn.write("")
-                for _, item_row in df_filtrado.iterrows():
-                    material_cat = str(item_row[col_material]).strip()
-                    valor_item = parse_numero(item_row[col_preco]) if col_preco else 0.0
-                    chave_mat = re.sub(r"\W+", "_", material_cat)[:80]
-                    c_item, c_qtd, c_btn = st.columns([4.4, 0.9, 1.2])
-                    c_item.write(material_cat)
-                    qtd_item = c_qtd.number_input(
-                        "Qtd",
-                        min_value=1,
-                        value=1,
-                        step=1,
-                        key=f"pedido_qtd_{categoria_selecionada}_{chave_mat}",
-                        label_visibility="collapsed",
-                    )
-                    if c_btn.button("Incluir", key=f"pedido_add_{categoria_selecionada}_{chave_mat}"):
-                        incluir_item_carrinho(
-                            distrito_selecionado,
-                            ubs_selecionada,
-                            categoria_selecionada,
-                            material_cat,
-                            qtd_item,
-                            valor_item,
-                        )
-                        st.success(f"Incluído: {qtd_item}x {material_cat}")
-                        st.rerun()
-    else:
-        if unidade_ok:
-            st.caption("Selecione a categoria para ver o catálogo e incluir os itens.")
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
 with aba2:
