@@ -3792,7 +3792,11 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                         with col_r1:
                             tipo_relatorio = st.selectbox("Tipo", ["Geral (Consolidado)", "Por Categoria"], key="tr_analitico")
                         with col_r2:
-                            periodo = st.selectbox("Período", ["Todo o Período", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"], key="per_analitico")
+                            periodo = st.selectbox(
+                                "Período",
+                                ["Todo o Período", "Data específica", "Última Semana (7 dias)", "Último Mês (30 dias)", "Ano Atual"],
+                                key="per_analitico",
+                            )
                         with col_r3:
                             lista_dist_rel = ["Todos os Distritos"] + list(distritos_ubs.keys())
                             dist_rel_esc = st.selectbox("Distrito", lista_dist_rel, key="dist_rel_filtro")
@@ -3807,6 +3811,10 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                                 ubs_escolhida = st.session_state.ubs_nome
                                 st.text_input("UBS", value=ubs_escolhida, disabled=True, key="ubs_analitico_ubs")
 
+                        data_analitico = None
+                        if periodo == "Data específica":
+                            data_analitico = campo_data_br("Data", chave="data_analitico")
+
                         df_rel = df_supabase.copy()
                         if dist_rel_esc != "Todos os Distritos":
                             unidades_d_rel = distritos_ubs.get(dist_rel_esc, [])
@@ -3815,7 +3823,12 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                             df_rel = df_rel[df_rel['ubs'] == ubs_escolhida]
                             
                         agora = pd.Timestamp.now()
-                        if periodo == "Última Semana (7 dias)":
+                        rotulo_periodo = periodo
+                        if periodo == "Data específica" and data_analitico:
+                            datas_pedido = pd.to_datetime(df_rel["data_dt"], errors="coerce")
+                            df_rel = df_rel[datas_pedido.dt.date == data_analitico]
+                            rotulo_periodo = formatar_data_br(data_analitico)
+                        elif periodo == "Última Semana (7 dias)":
                             df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=7))]
                         elif periodo == "Último Mês (30 dias)":
                             df_rel = df_rel[df_rel['data_dt'] >= (agora - pd.Timedelta(days=30))]
@@ -3828,7 +3841,7 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
                         else:
                             if tipo_relatorio == "Geral (Consolidado)":
-                                st.write(f"**Consolidado Geral (Solicitado vs Entregue) - Escopo: {ubs_escolhida} ({periodo})**")
+                                st.write(f"**Consolidado Geral (Solicitado vs Entregue) - Escopo: {ubs_escolhida} ({rotulo_periodo})**")
                                 
                                 if st.session_state.perfil == "GESTAO":
                                     df_consolidado = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "quantidade_entregue": "sum", "custo_total": "sum"}).reset_index()
@@ -3838,6 +3851,8 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                                 else:
                                     df_exibicao = df_rel.groupby(["categoria", "material"]).agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
                                     df_exibicao.columns = ["Categoria", "Material", "Qtd Solicitada", "Qtd Entregue"]
+                                if periodo == "Data específica" and data_analitico:
+                                    df_exibicao.insert(0, "Data", formatar_data_br(data_analitico))
                                 
                                 st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
                                 
@@ -3864,7 +3879,9 @@ if secao_gestao in (None, "Painel gerencial", "Relatórios"):
                                     df_cat_ex = df_cat_filtrado.groupby("material").agg({"quantidade": "sum", "quantidade_entregue": "sum"}).reset_index()
                                     df_cat_ex.columns = ["Material", "Qtd Solicitada", "Qtd Entregue"]
                                 
-                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Escopo: {ubs_escolhida}**")
+                                st.write(f"**Consolidado da Categoria: {cat_escolhida} | Escopo: {ubs_escolhida} ({rotulo_periodo})**")
+                                if periodo == "Data específica" and data_analitico:
+                                    df_cat_ex.insert(0, "Data", formatar_data_br(data_analitico))
                                 st.dataframe(df_cat_ex, use_container_width=True, hide_index=True)
                                 
                                 st.markdown(f"#### 📊 Gráfico Comparativo - {cat_escolhida}")
