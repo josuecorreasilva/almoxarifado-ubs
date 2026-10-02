@@ -93,14 +93,26 @@ st.markdown("""
             right: 0 !important;
             bottom: 0 !important;
             visibility: visible !important;
-            font-size: 10px !important;
-            color: #222 !important;
+            font-size: 8px !important;
+            color: #555 !important;
             text-align: left !important;
+            font-style: italic !important;
             padding: 0 10mm 4mm 10mm !important;
             background: transparent !important;
         }
+        .credito-sispac { display: none !important; }
     }
     .rodape-impressao { display: none; }
+    .credito-sispac {
+        margin-top: 1.4rem;
+        padding-top: 0.45rem;
+        border-top: 1px solid #e6eaed;
+        font-size: 0.72rem;
+        color: #7f8c8d;
+        text-align: left;
+        letter-spacing: 0.01em;
+        font-style: italic;
+    }
     .area-impressao table {
         width: 100%;
         border-collapse: collapse;
@@ -138,7 +150,7 @@ st.markdown("""
         font-size: 11px;
         color: #666;
     }
-    .block-container { padding-top: 0.7rem; padding-bottom: 1.1rem; max-width: 1400px; }
+    .block-container { padding-top: 0.7rem; padding-bottom: 2.2rem; max-width: 1400px; }
     [data-testid="stSidebar"] { background: #f4f7f8; }
     [data-testid="stHeader"] { background: transparent; }
     [data-testid="stSidebarNav"],
@@ -754,7 +766,24 @@ def abrir_pedido_lista(numero, modo, imprimir=False):
     st.session_state.modo_abertura = modo
     if imprimir:
         pedir_impressao()
-    st.rerun()
+
+
+def voltar_lista_pedidos():
+    st.session_state.pedido_aberto = None
+    st.session_state.modo_abertura = None
+
+
+def ao_despachar_pedido(numero, rotulo_lista):
+    try:
+        despachar_pedido(numero)
+        st.session_state.aviso_lista_pedidos = (
+            f"Pedido {numero} em trânsito. Estoque central baixado. Aguardando a UBS confirmar."
+        )
+        st.session_state._ir_lista_pedidos = rotulo_lista
+        voltar_lista_pedidos()
+        st.session_state.pop("erro_despacho", None)
+    except Exception as e:
+        st.session_state.erro_despacho = str(e)
 
 
 def pedir_impressao():
@@ -858,48 +887,45 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
             with c_txt:
                 st.markdown(html_linha_pedido(numero, ubs, status, data_txt), unsafe_allow_html=True)
                 if pode_abrir_texto:
+                    modo = "visualizar"
+                    if acao == "conferir":
+                        modo = "conferir"
+                    elif acao == "despachar":
+                        modo = "despachar" if pedido_separado(status) else "visualizar"
+                    elif acao == "receber":
+                        modo = "receber" if pedido_em_transito(status) else "visualizar"
                     with st.container(key=f"hit_{chave}_{i}"):
-                        if st.button("Abrir pedido", key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
-                            modo = "visualizar"
-                            if acao == "conferir":
-                                modo = "conferir"
-                            elif acao == "despachar":
-                                modo = "despachar" if pedido_separado(status) else "visualizar"
-                            elif acao == "receber":
-                                modo = "receber" if pedido_em_transito(status) else "visualizar"
-                            abrir_pedido_lista(numero, modo)
+                        st.button(
+                            "Abrir pedido",
+                            key=f"{chave}_txt_{i}_{numero}",
+                            use_container_width=True,
+                            on_click=abrir_pedido_lista,
+                            args=(numero, modo),
+                        )
             if acao == "conferir":
                 with c_acao:
                     if st.session_state.perfil == "GESTAO":
-                        if st.button("Conferir", key=f"{chave}_conf_{i}_{numero}"):
-                            abrir_pedido_lista(numero, "conferir")
+                        st.button("Conferir", key=f"{chave}_conf_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "conferir"))
             elif acao == "despachar":
                 with c_acao:
                     if pedido_separado(status):
-                        if st.button("Despachar", key=f"{chave}_desp_{i}_{numero}"):
-                            abrir_pedido_lista(numero, "despachar")
+                        st.button("Despachar", key=f"{chave}_desp_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "despachar"))
                     else:
-                        if st.button("Ver", key=f"{chave}_ver_tr_{i}_{numero}"):
-                            abrir_pedido_lista(numero, "visualizar")
+                        st.button("Ver", key=f"{chave}_ver_tr_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "visualizar"))
                 with c_imp:
-                    if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
-                        modo = "despachar" if pedido_separado(status) else "visualizar"
-                        abrir_pedido_lista(numero, modo, imprimir=True)
+                    modo_imp = "despachar" if pedido_separado(status) else "visualizar"
+                    st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, modo_imp, True))
             elif acao == "receber":
                 with c_acao:
                     if pedido_em_transito(status):
-                        if st.button("Receber", key=f"{chave}_rec_{i}_{numero}"):
-                            abrir_pedido_lista(numero, "receber")
+                        st.button("Receber", key=f"{chave}_rec_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "receber"))
                     else:
-                        if st.button("Ver", key=f"{chave}_ver_rc_{i}_{numero}"):
-                            abrir_pedido_lista(numero, "visualizar")
+                        st.button("Ver", key=f"{chave}_ver_rc_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "visualizar"))
             else:
                 with c_ver:
-                    if st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}"):
-                        abrir_pedido_lista(numero, "visualizar")
+                    st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "visualizar"))
                 with c_imp:
-                    if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
-                        abrir_pedido_lista(numero, "visualizar", imprimir=True)
+                    st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}", on_click=abrir_pedido_lista, args=(numero, "visualizar", True))
 
 
 def status_consolidado_pedido(df_itens):
@@ -1046,10 +1072,19 @@ AVISO_PARCIAL = (
     "Vale somente a quantidade entregue."
 )
 RODAPE_IMPRESSAO = "https://pedidos-ubs-pelotas"
+CREDITO_SISPAC = "Desenvolvido por Josué Corrêa da Silva, Gestão e Inovação Pública"
+
+
+def html_credito_sispac():
+    return f"<div class='credito-sispac'><em>{html_seguro(CREDITO_SISPAC)}</em></div>"
 
 
 def html_rodape_impressao():
-    return f"<div class='rodape-impressao'>{html_seguro(RODAPE_IMPRESSAO)}</div>"
+    return (
+        "<div class='rodape-impressao'>"
+        f"<em>{html_seguro(RODAPE_IMPRESSAO)} · {html_seguro(CREDITO_SISPAC)}</em>"
+        "</div>"
+    )
 
 
 def linhas_comprovante(detalhes, status_atual, sem_custo=True):
@@ -1107,7 +1142,7 @@ if FPDF_DISPONIVEL:
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 8)
-            self.cell(0, 6, texto_pdf(RODAPE_IMPRESSAO), align="L")
+            self.cell(0, 5, texto_pdf(f"{RODAPE_IMPRESSAO}  |  {CREDITO_SISPAC}"), align="L")
 else:
     class PdfSisPAC:
         pass
@@ -2348,19 +2383,25 @@ def abrir_empenho_lista(empenho_id):
     st.session_state.empenho_para_nota = int(empenho_id)
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
-    st.rerun()
 
 
 def fechar_empenho_lista():
     st.session_state.empenho_aberto = None
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
-    st.rerun()
 
 
 def abrir_nota_lista(nota_id):
     st.session_state.nota_aberta = int(nota_id)
-    st.rerun()
+
+
+def mostrar_notas_do_empenho():
+    st.session_state.mostrar_notas_empenho = True
+
+
+def ocultar_notas_do_empenho():
+    st.session_state.mostrar_notas_empenho = False
+    st.session_state.nota_aberta = None
 
 
 def limpar_formulario_nota_fiscal():
@@ -2631,11 +2672,21 @@ def render_painel_empenhos(usuario_atual):
                     unsafe_allow_html=True,
                 )
                 with st.container(key=f"hit_emp_{i}_{emp_id}"):
-                    if st.button("Selecionar empenho", key=f"emp_txt_{i}_{emp_id}", use_container_width=True):
-                        abrir_empenho_lista(emp_id)
+                    st.button(
+                        "Selecionar empenho",
+                        key=f"emp_txt_{i}_{emp_id}",
+                        use_container_width=True,
+                        on_click=abrir_empenho_lista,
+                        args=(emp_id,),
+                    )
                 with st.container(key=f"open_emp_{i}_{emp_id}"):
-                    if st.button("Abrir", key=f"emp_abrir_{i}_{emp_id}", use_container_width=True):
-                        abrir_empenho_lista(emp_id)
+                    st.button(
+                        "Abrir",
+                        key=f"emp_abrir_{i}_{emp_id}",
+                        use_container_width=True,
+                        on_click=abrir_empenho_lista,
+                        args=(emp_id,),
+                    )
 
     if not aberto_id:
         st.caption("Clique no texto da linha ou em Abrir para ver o empenho.")
@@ -2655,8 +2706,7 @@ def render_painel_empenhos(usuario_atual):
     with c_tit:
         st.markdown("##### Empenho selecionado")
     with c_fechar:
-        if st.button("Fechar", key=f"btn_fechar_emp_{empenho_ver['id']}", use_container_width=True):
-            fechar_empenho_lista()
+        st.button("Fechar", key=f"btn_fechar_emp_{empenho_ver['id']}", use_container_width=True, on_click=fechar_empenho_lista)
     st.caption(
         f"{empenho_ver.get('numero_empenho')} — "
         f"valor {formatar_moeda_br(valor_emp_sel)} · "
@@ -2696,14 +2746,13 @@ def render_painel_empenhos(usuario_atual):
 
     qtd_notas_emp = int(empenho_ver.get("notas") or qtd_nf.get(empenho_ver["id"], 0) or 0)
     if st.session_state.get("mostrar_notas_empenho"):
-        if st.button("Ocultar notas", key=f"btn_ocultar_notas_{empenho_ver['id']}"):
-            st.session_state.mostrar_notas_empenho = False
-            st.session_state.nota_aberta = None
-            st.rerun()
+        st.button("Ocultar notas", key=f"btn_ocultar_notas_{empenho_ver['id']}", on_click=ocultar_notas_do_empenho)
     else:
-        if st.button(f"Ver notas deste empenho ({qtd_notas_emp})", key=f"btn_ver_notas_{empenho_ver['id']}"):
-            st.session_state.mostrar_notas_empenho = True
-            st.rerun()
+        st.button(
+            f"Ver notas deste empenho ({qtd_notas_emp})",
+            key=f"btn_ver_notas_{empenho_ver['id']}",
+            on_click=mostrar_notas_do_empenho,
+        )
 
     if not st.session_state.get("mostrar_notas_empenho"):
         return
@@ -2741,11 +2790,21 @@ def render_painel_empenhos(usuario_atual):
                     unsafe_allow_html=True,
                 )
                 with st.container(key=f"hit_nf_{i}_{nota_id}"):
-                    if st.button("Selecionar nota", key=f"nf_txt_{i}_{nota_id}", use_container_width=True):
-                        abrir_nota_lista(nota_id)
+                    st.button(
+                        "Selecionar nota",
+                        key=f"nf_txt_{i}_{nota_id}",
+                        use_container_width=True,
+                        on_click=abrir_nota_lista,
+                        args=(nota_id,),
+                    )
                 with st.container(key=f"open_nf_{i}_{nota_id}"):
-                    if st.button("Abrir", key=f"nf_abrir_{i}_{nota_id}", use_container_width=True):
-                        abrir_nota_lista(nota_id)
+                    st.button(
+                        "Abrir",
+                        key=f"nf_abrir_{i}_{nota_id}",
+                        use_container_width=True,
+                        on_click=abrir_nota_lista,
+                        args=(nota_id,),
+                    )
 
     if not nota_aberta:
         st.caption("Clique na nota para ver o anexo. Se não houver PDF, o sistema informa que não consta nota em anexo.")
@@ -2930,6 +2989,7 @@ if not st.session_state.autenticado:
             except Exception as e:
                 st.error("Credenciais inválidas. Verifique o e-mail e a senha.")
                 
+    st.markdown(html_credito_sispac(), unsafe_allow_html=True)
     st.stop() 
 
 # ==========================================
@@ -3565,10 +3625,7 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                     )
 
                         if pedido_selecionado != "Selecione...":
-                            if st.button("← Voltar à lista", key="btn_voltar_pedido"):
-                                st.session_state.pedido_aberto = None
-                                st.session_state.modo_abertura = None
-                                st.rerun()
+                            st.button("← Voltar à lista", key="btn_voltar_pedido", on_click=voltar_lista_pedidos)
                             detalhes = df_supabase[df_supabase["numero_pedido"] == pedido_selecionado]
                             status_atual = status_consolidado_pedido(detalhes)
                             modo_abertura = st.session_state.get("modo_abertura") or (
@@ -3671,20 +3728,20 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                             if st.session_state.perfil == "GESTAO" and pedido_separado(status_atual):
                                 st.markdown("### Saída para entrega")
                                 st.caption("Imprima o pedido e, em seguida, registre a saída. O estoque central baixa e o pedido fica em trânsito até a UBS confirmar.")
-                                if st.button("Registrar saída para entrega", type="primary", key=f"btn_despachar_{pedido_selecionado}"):
-                                    try:
-                                        despachar_pedido(pedido_selecionado)
-                                        st.session_state.aviso_lista_pedidos = (
-                                            f"Pedido {pedido_selecionado} em trânsito. Estoque central baixado. Aguardando a UBS confirmar."
-                                        )
-                                        st.session_state._ir_lista_pedidos = rotulo_lista_por_status(
+                                if st.session_state.get("erro_despacho"):
+                                    st.error(st.session_state.erro_despacho)
+                                st.button(
+                                    "Registrar saída para entrega",
+                                    type="primary",
+                                    key=f"btn_despachar_{pedido_selecionado}",
+                                    on_click=ao_despachar_pedido,
+                                    args=(
+                                        pedido_selecionado,
+                                        rotulo_lista_por_status(
                                             STATUS_TRANSITO, st.session_state.perfil, opcoes_lista_ped
-                                        )
-                                        st.session_state.pedido_aberto = None
-                                        st.session_state.modo_abertura = None
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(str(e))
+                                        ),
+                                    ),
+                                )
 
                             if st.session_state.perfil == "UBS" and pedido_em_transito(status_atual):
                                 st.markdown("### Confirmar recebimento")
@@ -3739,15 +3796,11 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                 st.markdown(textwrap.dedent(html_pedido).strip(), unsafe_allow_html=True)
                                 render_iframe_impressao()
 
-                                sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
-                                nome_pdf = aplicar_sufixo_arquivo(
-                                    nome_arquivo_pedido(
-                                        pedido_selecionado,
-                                        detalhes["ubs"].iloc[0],
-                                        detalhes["data"].iloc[0],
-                                        extensao="pdf",
-                                    ),
-                                    sufixo_via,
+                                nome_pdf = nome_arquivo_pedido(
+                                    pedido_selecionado,
+                                    detalhes["ubs"].iloc[0],
+                                    detalhes["data"].iloc[0],
+                                    extensao="pdf",
                                 )
                                 nome_csv_final = nome_pdf.replace(".pdf", ".csv")
                                 pdf_bytes = gerar_pdf_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
@@ -3777,9 +3830,7 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                         key=f"dl_comp_{pedido_selecionado}",
                                     )
                                 with c_imp:
-                                    if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
-                                        pedir_impressao()
-                                        st.rerun()
+                                    st.button("Imprimir", key=f"print_comp_{pedido_selecionado}", on_click=pedir_impressao)
                                 st.caption("Na janela de impressão, em Destino, escolha a impressora. Se aparecer só Salvar como PDF, abra a lista de destinos.")
 
                     elif sub_relatorio == "Centro de custos":
@@ -4147,7 +4198,6 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                 agora_sispac(),
                                 extensao="pdf",
                             )
-                            nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
                             tabela_html = dataframe_para_html(df_print, destacar_ultima=True)
                             html_relatorio = f"""
                             <div class="area-impressao" style="padding: 8px; background-color: #ffffff;">
@@ -4192,9 +4242,7 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                                     key="dl_rel_oficial_pdf",
                                 )
                             with c_imp_rel:
-                                if st.button("Imprimir", key="btn_print_rel_oficial"):
-                                    pedir_impressao()
-                                    st.rerun()
+                                st.button("Imprimir", key="btn_print_rel_oficial", on_click=pedir_impressao)
                             render_iframe_impressao()
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
@@ -4436,3 +4484,5 @@ if aba_estoque_ubs is not None:
         st.markdown("#### Estoque desta unidade")
         st.caption("O que o almoxarifado enviou entra aqui. Informe o que foi usado no dia a dia para o saldo ficar correto.")
         render_painel_estoque_ubs(modo_gestao=False)
+
+st.markdown(html_credito_sispac(), unsafe_allow_html=True)
