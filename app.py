@@ -2255,9 +2255,9 @@ def gravar_pdf_registro(tabela, registro_id, caminho, nome):
     limpar_cache_empenhos()
 
 
-def bloco_pdf_registro(rotulo, caminho, nome, chave_dl):
+def bloco_pdf_registro(rotulo, caminho, nome, chave_dl, sem_anexo=None):
     if not caminho:
-        st.caption(f"{rotulo}: nenhum arquivo ainda.")
+        st.info(sem_anexo or "Não consta documento em anexo.")
         return
     nome_exibir = nome or "documento.pdf"
     url = url_documento_sispac(caminho)
@@ -2330,6 +2330,11 @@ def fechar_empenho_lista():
     st.session_state.empenho_aberto = None
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
+    st.rerun()
+
+
+def abrir_nota_lista(nota_id):
+    st.session_state.nota_aberta = int(nota_id)
     st.rerun()
 
 
@@ -2642,6 +2647,7 @@ def render_painel_empenhos(usuario_atual):
         empenho_ver.get("pdf_caminho"),
         empenho_ver.get("pdf_nome"),
         f"dl_emp_{empenho_ver['id']}",
+        sem_anexo="Não consta PDF do empenho em anexo.",
     )
     pdf_emp_extra = st.file_uploader(
         "Incluir ou substituir PDF do empenho",
@@ -2717,7 +2723,7 @@ def render_painel_empenhos(usuario_atual):
                         abrir_nota_lista(nota_id)
 
     if not nota_aberta:
-        st.info("Clique no texto de uma nota para abrir o PDF digitalizado.")
+        st.caption("Clique na nota para ver o anexo. Se não houver PDF, o sistema informa que não consta nota em anexo.")
         return
     nota_ver = next((r for r in df_notas_sel.to_dict("records") if int(r["id"]) == int(nota_aberta)), None)
     if nota_ver is None:
@@ -2733,6 +2739,7 @@ def render_painel_empenhos(usuario_atual):
         nota_ver.get("pdf_caminho"),
         nota_ver.get("pdf_nome"),
         f"dl_nf_{nota_ver['id']}",
+        sem_anexo="Não consta nota em anexo.",
     )
     pdf_nf_extra = st.file_uploader(
         "Incluir ou substituir PDF da nota digitalizada",
