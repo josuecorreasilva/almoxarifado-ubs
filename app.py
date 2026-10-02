@@ -1596,6 +1596,236 @@ def carregar_movimentos_ubs(ubs=None, limite=100):
     return df[df["ubs"].astype(str).str.strip().str.lower() == str(ubs).strip().lower()]
 
 
+def _erro_tabela_ausente(erro):
+    texto = str(erro).lower()
+    return any(trecho in texto for trecho in (
+        "does not exist",
+        "pgrst205",
+        "schema cache",
+        "could not find the table",
+        "relation",
+    )) and any(nome in texto for nome in ("sispac_empenhos", "sispac_notas_fiscais", "notas_fiscais"))
+
+
+def carregar_empenhos():
+    try:
+        resposta = (
+            supabase.table("sispac_empenhos")
+            .select("*")
+            .order("data_empenho", desc=True)
+            .execute()
+        )
+        return pd.DataFrame(resposta.data or []), None
+    except Exception as e:
+        return pd.DataFrame(), e
+
+
+def carregar_notas_empenho(empenho_id=None):
+    try:
+        consulta = supabase.table("sispac_notas_fiscais").select("*").order("data_emissao", desc=True)
+        if empenho_id is not None:
+            consulta = consulta.eq("empenho_id", int(empenho_id))
+        resposta = consulta.execute()
+        return pd.DataFrame(resposta.data or []), None
+    except Exception as e:
+        return pd.DataFrame(), e
+
+
+def rotulo_empenho(linha):
+    numero = str(linha.get("numero_empenho") or "").strip()
+    ano = linha.get("ano") or ""
+    fornecedor = str(linha.get("fornecedor") or "").strip()
+    if fornecedor:
+        return f"{numero}/{ano} — {fornecedor}"
+    return f"{numero}/{ano}"
+
+
+def render_painel_empenhos(usuario_atual):
+    st.markdown("#### Empenhos e notas fiscais")
+    st.caption(
+        "Neste espaço entra só o empenho e as notas fiscais ligadas a ele. "
+        "O cadastro de material, o lote e o pedido continuam nas outras abas."
+    )
+
+    df_empenhos, erro_emp = carregar_empenhos()
+    if erro_emp is not None:
+        if _erro_tabela_ausente(erro_emp) or _rpc_ausente(erro_emp):
+            st.warning(
+                "As tabelas de empenho ainda não existem no banco. "
+                "Execute o arquivo `supabase/sispac_empenhos.sql` no SQL Editor do Supabase e dê Reboot."
+            )
+            return
+        st.error(f"Não foi possível ler os empenhos: {erro_emp}")
+        return
+
+    col_emp, col_nf = st.columns(2, gap="medium")
+    with col_emp:
+        st.markdown("##### Novo empenho")
+        with st.form("form_novo_empenho"):
+            numero_emp = st.text_input("Número do empenho")
+            data_emp = st.date_input("Data do empenho", value=date.today())
+            fornecedor_emp = st.text_input("Fornecedor")
+            cnpj_emp = st.text_input("CNPJ (opcional)")
+            valor_emp = st.number_input("Valor do empenho (R$)", min_value=0.0, value=0.0, format="%.2f")
+            objeto_emp = st.text_area("Objeto / descrição (opcional)", height=80)
+            obs_emp = st.text_input("Observação (opcional)")
+            if st.form_submit_button("Registrar empenho"):
+                numero_limpo = str(numero_emp or "").strip()
+                if not numero_limpo:
+                    st.error("Informe o número do empenho.")
+                else:
+                    try:
+                        supabase.table("sispac_empenhos").insert({
+                            "numero_empenho": numero_limpo,
+                            "ano": int(data_emp.year),
+                            "data_empenho": data_emp.strftime("%Y-%m-%d"),
+                            "fornecedor": str(fornecedor_emp or "").strip(),
+                            "cnpj": str(cnpj_emp or "").strip(),
+                            "objeto": str(objeto_emp or "").strip(),
+                            "valor_empenho": float(valor_emp or 0),
+                            "observacao": str(obs_emp or "").strip(),
+                            "criado_por": usuario_atual,
+                        }).execute()
+                        registrar_auditoria("CADASTRO_EMPENHO", "sispac_empenhos", numero_limpo)
+                        st.success(f"Empenho {numero_limpo} registrado.")
+                        st.rerun()
+                    except Exception as e:
+                        if "duplicate" in str(e).lower() or "23505" in str(e):
+                            st.error("Este número de empenho já está cadastrado neste ano.")
+                        else:
+                            st.error(f"Não foi possível registrar o empenho: {e}")
+
+    with col_nf:
+        st.markdown("##### Nota fiscal do empenho")
+        if df_empenhos.empty:
+            st.info("Cadastre um empenho ao lado para lançar as notas nele.")
+        else:
+            opcoes_emp = df_empenhos.to_dict("records")
+            rotulos = [rotulo_empenho(r) for r in opcoes_emp]
+            escolha = st.selectbox("Empenho", rotulos, key="sel_empenho_nota")
+            empenho_nf = opcoes_emp[rotulos.index(escolha)]
+            with st.form("form_nova_nota"):
+                numero_nf = st.text_input("Número da nota fiscal")
+                c_ser, c_dt = st.columns(2)
+                with c_ser:
+                    serie_nf = st.text_input("Série (opcional)")
+                with c_dt:
+                    data_nf = st.date_input("Data de emissão", value=date.today(), key="data_emissao_nf")
+                valor_nf = st.number_input("Valor da nota (R$)", min_value=0.0, value=0.0, format="%.2f")
+                chave_nf = st.text_input("Chave de acesso (opcional)")
+                obs_nf = st.text_input("Observação da nota (opcional)")
+                if st.form_submit_button("Lançar nota no empenho"):
+                    numero_nf_limpo = str(numero_nf or "").strip()
+                    if not numero_nf_limpo:
+                        st.error("Informe o número da nota fiscal.")
+                    else:
+                        try:
+                            supabase.table("sispac_notas_fiscais").insert({
+                                "empenho_id": int(empenho_nf["id"]),
+                                "numero_nf": numero_nf_limpo,
+                                "serie": str(serie_nf or "").strip(),
+                                "data_emissao": data_nf.strftime("%Y-%m-%d"),
+                                "valor_nf": float(valor_nf or 0),
+                                "chave_acesso": str(chave_nf or "").strip(),
+                                "observacao": str(obs_nf or "").strip(),
+                                "criado_por": usuario_atual,
+                            }).execute()
+                            registrar_auditoria(
+                                "CADASTRO_NF",
+                                "sispac_notas_fiscais",
+                                f"NF {numero_nf_limpo} no empenho {empenho_nf.get('numero_empenho')}",
+                            )
+                            st.success(f"Nota {numero_nf_limpo} lançada no empenho {empenho_nf.get('numero_empenho')}.")
+                            st.rerun()
+                        except Exception as e:
+                            if "duplicate" in str(e).lower() or "23505" in str(e):
+                                st.error("Esta nota (número e série) já está lançada neste empenho.")
+                            else:
+                                st.error(f"Não foi possível lançar a nota: {e}")
+
+    st.markdown("---")
+    st.markdown("##### Empenhos registrados")
+    if df_empenhos.empty:
+        st.info("Nenhum empenho cadastrado ainda.")
+        return
+
+    df_notas_todas, erro_nf = carregar_notas_empenho()
+    if erro_nf is not None and not _erro_tabela_ausente(erro_nf) and not _rpc_ausente(erro_nf):
+        st.error(f"Não foi possível ler as notas: {erro_nf}")
+        df_notas_todas = pd.DataFrame()
+
+    if df_notas_todas is None or df_notas_todas.empty:
+        soma_nf = {}
+        qtd_nf = {}
+    else:
+        df_notas_todas["valor_nf"] = pd.to_numeric(df_notas_todas.get("valor_nf"), errors="coerce").fillna(0.0)
+        soma_nf = df_notas_todas.groupby("empenho_id")["valor_nf"].sum().to_dict()
+        qtd_nf = df_notas_todas.groupby("empenho_id")["id"].count().to_dict()
+
+    busca_emp = st.text_input("Buscar empenho, fornecedor ou objeto", key="filtro_empenhos", placeholder="Digite parte do número ou do nome")
+    df_lista = df_empenhos.copy()
+    if busca_emp and str(busca_emp).strip():
+        termo = str(busca_emp).strip()
+        mascara = False
+        for col in ["numero_empenho", "fornecedor", "objeto", "cnpj"]:
+            if col in df_lista.columns:
+                mascara = mascara | df_lista[col].astype(str).str.contains(termo, case=False, regex=False, na=False)
+        df_lista = df_lista[mascara] if isinstance(mascara, pd.Series) else df_lista
+
+    if df_lista.empty:
+        st.info("Nenhum empenho com esse filtro.")
+        return
+
+    df_lista = df_lista.copy()
+    df_lista["valor_empenho"] = pd.to_numeric(df_lista.get("valor_empenho"), errors="coerce").fillna(0.0)
+    df_lista["notas"] = df_lista["id"].map(lambda i: int(qtd_nf.get(i, 0)))
+    df_lista["valor_notas"] = df_lista["id"].map(lambda i: float(soma_nf.get(i, 0.0)))
+    df_lista["saldo"] = df_lista["valor_empenho"] - df_lista["valor_notas"]
+    df_exibir = pd.DataFrame({
+        "Empenho": df_lista["numero_empenho"].astype(str),
+        "Ano": df_lista["ano"],
+        "Data": df_lista["data_empenho"],
+        "Fornecedor": df_lista.get("fornecedor", ""),
+        "Valor empenho": df_lista["valor_empenho"].map(formatar_moeda_br),
+        "Notas": df_lista["notas"],
+        "Valor das notas": df_lista["valor_notas"].map(formatar_moeda_br),
+        "Saldo (empenho − notas)": df_lista["saldo"].map(formatar_moeda_br),
+    })
+    st.dataframe(df_exibir, use_container_width=True, hide_index=True)
+
+    st.markdown("##### Notas do empenho selecionado")
+    opcoes_ver = df_lista.to_dict("records")
+    rotulos_ver = [rotulo_empenho(r) for r in opcoes_ver]
+    escolha_ver = st.selectbox("Ver notas de", rotulos_ver, key="sel_empenho_ver")
+    empenho_ver = opcoes_ver[rotulos_ver.index(escolha_ver)]
+    valor_emp_sel = float(empenho_ver.get("valor_empenho") or 0)
+    valor_nf_sel = float(soma_nf.get(empenho_ver["id"], 0.0))
+    st.caption(
+        f"Empenho {empenho_ver.get('numero_empenho')} — "
+        f"valor {formatar_moeda_br(valor_emp_sel)} · "
+        f"notas {formatar_moeda_br(valor_nf_sel)} · "
+        f"saldo {formatar_moeda_br(valor_emp_sel - valor_nf_sel)}"
+    )
+    objeto_txt = str(empenho_ver.get("objeto") or "").strip()
+    if objeto_txt:
+        st.caption(f"Objeto: {objeto_txt}")
+
+    df_notas_sel, _ = carregar_notas_empenho(empenho_ver["id"])
+    if df_notas_sel is None or df_notas_sel.empty:
+        st.info("Ainda não há nota fiscal neste empenho.")
+        return
+    df_notas_sel["valor_nf"] = pd.to_numeric(df_notas_sel.get("valor_nf"), errors="coerce").fillna(0.0)
+    df_nf_exibir = pd.DataFrame({
+        "Nota": df_notas_sel["numero_nf"].astype(str),
+        "Série": df_notas_sel.get("serie", ""),
+        "Emissão": df_notas_sel.get("data_emissao", ""),
+        "Valor": df_notas_sel["valor_nf"].map(formatar_moeda_br),
+        "Chave de acesso": df_notas_sel.get("chave_acesso", ""),
+        "Observação": df_notas_sel.get("observacao", ""),
+    })
+    st.dataframe(df_nf_exibir, use_container_width=True, hide_index=True)
+
+
 def render_painel_estoque_ubs(modo_gestao=False):
     ubs_sessao = st.session_state.get("ubs_nome")
     prefixo = "gestao" if modo_gestao else "ubs"
@@ -1743,7 +1973,7 @@ if not st.session_state.autenticado:
 # 4. BARRA LATERAL (MENU DE USUÁRIO)
 # ==========================================
 st.sidebar.markdown("### SisPAC")
-st.sidebar.caption("Pedidos, conferência e relatórios")
+st.sidebar.caption("Pedidos, conferência, relatórios e empenhos")
 st.sidebar.caption("Almoxarifado Central — SMS Pelotas")
 st.sidebar.divider()
 st.sidebar.write(f"Usuário: **{st.session_state.email_usuario}**")
@@ -1774,11 +2004,14 @@ with col_titulo:
     )
 
 if st.session_state.perfil == "GESTAO":
-    aba1, aba2, aba3 = st.tabs(["Novo pedido", "Painel gerencial", "Cadastro e estoque"])
+    aba1, aba2, aba3, aba4 = st.tabs(
+        ["Novo pedido", "Painel gerencial", "Cadastro e estoque", "Empenhos e notas"]
+    )
     aba_estoque_ubs = None
 else:
     aba1, aba2, aba_estoque_ubs = st.tabs(["Novo pedido", "Acompanhar pedidos", "Estoque da unidade"])
     aba3 = None
+    aba4 = None
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
 with aba1:
@@ -3067,6 +3300,10 @@ if aba3 is not None:
         st.markdown("##### Estoque das unidades (piloto)")
         st.caption("Saldo que chegou na UBS após a conferência. A unidade registra o consumo. Não mistura com o estoque central.")
         render_painel_estoque_ubs(modo_gestao=True)
+
+if aba4 is not None:
+    with aba4:
+        render_painel_empenhos(st.session_state.get("email_usuario"))
 
 if aba_estoque_ubs is not None:
     with aba_estoque_ubs:
