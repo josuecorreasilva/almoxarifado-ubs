@@ -1895,6 +1895,13 @@ def abrir_empenho_lista(empenho_id):
     st.rerun()
 
 
+def fechar_empenho_lista():
+    st.session_state.empenho_aberto = None
+    st.session_state.nota_aberta = None
+    st.session_state.mostrar_notas_empenho = False
+    st.rerun()
+
+
 def abrir_nota_lista(nota_id):
     st.session_state.nota_aberta = int(nota_id)
     st.rerun()
@@ -2157,7 +2164,12 @@ def render_painel_empenhos(usuario_atual):
 
     valor_emp_sel = float(empenho_ver.get("valor_empenho") or 0)
     valor_nf_sel = float(soma_nf.get(empenho_ver["id"], 0.0))
-    st.markdown("##### Empenho selecionado")
+    c_tit, c_fechar = st.columns([6.5, 1.5])
+    with c_tit:
+        st.markdown("##### Empenho selecionado")
+    with c_fechar:
+        if st.button("Fechar", key=f"btn_fechar_emp_{empenho_ver['id']}", use_container_width=True):
+            fechar_empenho_lista()
     st.caption(
         f"{empenho_ver.get('numero_empenho')} — "
         f"valor {formatar_moeda_br(valor_emp_sel)} · "
