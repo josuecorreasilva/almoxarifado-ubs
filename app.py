@@ -600,16 +600,41 @@ def texto_agora_sispac():
     return agora_sispac().strftime("%Y-%m-%d %H:%M:%S%z")
 
 
+def _texto_data_com_fuso(texto):
+    texto = str(texto or "").strip()
+    if len(texto) >= 5 and texto[-5] in "+-" and texto[-3] != ":":
+        return texto[:-2] + ":" + texto[-2:]
+    return texto
+
+
+def serie_data_sispac(serie):
+    texto = pd.Series(serie, copy=False).astype(str).map(_texto_data_com_fuso)
+    texto = texto.replace({"None": pd.NA, "nan": pd.NA, "NaT": pd.NA, "nat": pd.NA, "": pd.NA})
+    ts = pd.to_datetime(texto, errors="coerce", utc=True)
+    try:
+        local = ts.dt.tz_convert(FUSO_SISPAC)
+        return local.dt.tz_localize(None)
+    except Exception:
+        return ts
+
+
 def formatar_datahora_br(valor):
     if valor is None or (isinstance(valor, float) and pd.isna(valor)):
         return ""
+    if isinstance(valor, datetime):
+        ts = valor
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=FUSO_SISPAC)
+        else:
+            ts = ts.astimezone(FUSO_SISPAC)
+        return ts.strftime("%d/%m/%Y %H:%M")
     texto = str(valor).strip()
     if not texto or texto.lower() in {"nat", "nan", "none"}:
         return ""
     try:
-        ts = pd.to_datetime(valor, utc=False)
-        if getattr(ts, "tzinfo", None) is None:
-            ts = ts.tz_localize("UTC")
+        ts = pd.to_datetime(_texto_data_com_fuso(texto), utc=True)
+        if pd.isna(ts):
+            return texto[:16]
         ts = ts.tz_convert(FUSO_SISPAC)
         return ts.strftime("%d/%m/%Y %H:%M")
     except Exception:
@@ -3269,7 +3294,7 @@ if secao_gestao in (None, "Pedidos", "Relatórios"):
                 st.info("Nenhum pedido registrado no sistema.")
             else:
                 df_supabase = pd.DataFrame(dados)
-                df_supabase['data_dt'] = pd.to_datetime(df_supabase['data'])
+                df_supabase['data_dt'] = serie_data_sispac(df_supabase['data'])
                 
                 # Garante que as colunas numéricas existem e estão limpas
                 for col in ['valor_unitario', 'custo_total', 'quantidade']:
