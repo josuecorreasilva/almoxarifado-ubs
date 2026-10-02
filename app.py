@@ -2888,15 +2888,32 @@ with col_titulo:
     )
 
 if st.session_state.perfil == "GESTAO":
-    if st.session_state.get("em_relatorios") and st.session_state.get("secao_gestao") == "Painel gerencial":
-        st.session_state.secao_gestao = "Relatórios"
-        st.session_state.em_relatorios = False
-    secao_gestao = st.radio(
+    atual_secao = st.session_state.get("secao_gestao")
+    if atual_secao in {"Relatórios", "Cadastro e estoque", "Empenhos e notas"}:
+        st.session_state.secao_gerencial = atual_secao
+        st.session_state.secao_gestao = "Painel gerencial"
+    elif atual_secao == "Painel gerencial" and not st.session_state.get("secao_gerencial"):
+        st.session_state.secao_gestao = "Pedidos"
+    st.session_state.pop("em_relatorios", None)
+    secao_topo = st.radio(
         "Seção",
-        ["Novo pedido", "Painel gerencial", "Relatórios", "Cadastro e estoque", "Empenhos e notas"],
+        ["Novo pedido", "Pedidos", "Painel gerencial"],
         horizontal=True,
         key="secao_gestao",
     )
+    secao_gerencial = None
+    if secao_topo == "Painel gerencial":
+        secao_gerencial = st.radio(
+            "Painel gerencial",
+            ["Relatórios", "Cadastro e estoque", "Empenhos e notas"],
+            horizontal=True,
+            key="secao_gerencial",
+        )
+        secao_gestao = secao_gerencial
+    elif secao_topo == "Pedidos":
+        secao_gestao = "Pedidos"
+    else:
+        secao_gestao = secao_topo
     aba1 = aba2 = aba3 = aba4 = None
     aba_estoque_ubs = None
 else:
@@ -3159,18 +3176,18 @@ if secao_gestao in (None, "Novo pedido"):
                         st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
-if secao_gestao in (None, "Painel gerencial", "Relatórios"):
+if secao_gestao in (None, "Pedidos", "Relatórios"):
   with ctx_painel:
     if st.session_state.perfil == "GESTAO" and secao_gestao == "Relatórios":
         st.markdown(
             "<div class='nao-imprimir'><h4>Relatórios</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Painel analítico, documento oficial e centro de custos. Os pedidos ficam no Painel gerencial.</p></div>",
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Painel analítico, documento oficial e centro de custos.</p></div>",
             unsafe_allow_html=True,
         )
     elif st.session_state.perfil == "GESTAO":
         st.markdown(
-            "<div class='nao-imprimir'><h4>Painel de controle</h4>"
-            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Conferência, despacho e acompanhamento dos pedidos.</p></div>",
+            "<div class='nao-imprimir'><h4>Pedidos</h4>"
+            "<p style='color:#5d6d6e;font-size:0.9rem;margin-top:0;'>Conferência, despacho e acompanhamento. Relatórios, cadastro e empenhos ficam no Painel gerencial.</p></div>",
             unsafe_allow_html=True,
         )
     else:
