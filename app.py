@@ -944,6 +944,43 @@ def formatar_moeda_br(valor):
         return "R$ 0,00"
 
 
+def formatar_data_br(valor):
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    if isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y")
+    if isinstance(valor, date) and not isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y")
+    texto = str(valor).strip()
+    if not texto or texto.lower() in {"nat", "nan", "none", "nat"}:
+        return ""
+    try:
+        return pd.to_datetime(valor).strftime("%d/%m/%Y")
+    except Exception:
+        return texto
+
+
+def campo_valor_reais(rotulo, chave=None, ajuda="Digite como em reais: 1250 ou 87,38"):
+    kwargs = {"placeholder": "Ex.: 1.250,00"}
+    if chave:
+        kwargs["key"] = chave
+    if ajuda:
+        kwargs["help"] = ajuda
+    texto = st.text_input(rotulo, **kwargs)
+    return parse_numero(texto)
+
+
+def campo_data_br(rotulo, chave=None, valor=None):
+    kwargs = {"value": valor or date.today(), "format": "DD/MM/YYYY"}
+    if chave:
+        kwargs["key"] = chave
+    try:
+        return st.date_input(rotulo, **kwargs)
+    except TypeError:
+        kwargs.pop("format", None)
+        return st.date_input(rotulo, **kwargs)
+
+
 def montar_html_comprovante(detalhes, status_atual, sem_custo=True):
     obs = ""
     if "observacao" in detalhes.columns and pd.notna(detalhes["observacao"].iloc[0]):
@@ -1663,10 +1700,10 @@ def render_painel_empenhos(usuario_atual):
         st.markdown("##### Novo empenho")
         with st.form("form_novo_empenho"):
             numero_emp = st.text_input("Número do empenho")
-            data_emp = st.date_input("Data do empenho", value=date.today())
+            data_emp = campo_data_br("Data do empenho")
             fornecedor_emp = st.text_input("Fornecedor")
             cnpj_emp = st.text_input("CNPJ (opcional)")
-            valor_emp = st.number_input("Valor do empenho (R$)", min_value=0.0, value=0.0, format="%.2f")
+            valor_emp = campo_valor_reais("Valor do empenho (R$)", chave="valor_empenho_txt")
             objeto_emp = st.text_area("Objeto / descrição (opcional)", height=80)
             obs_emp = st.text_input("Observação (opcional)")
             if st.form_submit_button("Registrar empenho"):
@@ -1710,8 +1747,8 @@ def render_painel_empenhos(usuario_atual):
                 with c_ser:
                     serie_nf = st.text_input("Série (opcional)")
                 with c_dt:
-                    data_nf = st.date_input("Data de emissão", value=date.today(), key="data_emissao_nf")
-                valor_nf = st.number_input("Valor da nota (R$)", min_value=0.0, value=0.0, format="%.2f")
+                    data_nf = campo_data_br("Data de emissão", chave="data_emissao_nf")
+                valor_nf = campo_valor_reais("Valor da nota (R$)", chave="valor_nota_txt")
                 chave_nf = st.text_input("Chave de acesso (opcional)")
                 obs_nf = st.text_input("Observação da nota (opcional)")
                 if st.form_submit_button("Lançar nota no empenho"):
@@ -1784,7 +1821,7 @@ def render_painel_empenhos(usuario_atual):
     df_exibir = pd.DataFrame({
         "Empenho": df_lista["numero_empenho"].astype(str),
         "Ano": df_lista["ano"],
-        "Data": df_lista["data_empenho"],
+        "Data": df_lista["data_empenho"].map(formatar_data_br),
         "Fornecedor": df_lista.get("fornecedor", ""),
         "Valor empenho": df_lista["valor_empenho"].map(formatar_moeda_br),
         "Notas": df_lista["notas"],
@@ -1818,7 +1855,7 @@ def render_painel_empenhos(usuario_atual):
     df_nf_exibir = pd.DataFrame({
         "Nota": df_notas_sel["numero_nf"].astype(str),
         "Série": df_notas_sel.get("serie", ""),
-        "Emissão": df_notas_sel.get("data_emissao", ""),
+        "Emissão": df_notas_sel.get("data_emissao", pd.Series(dtype=str)).map(formatar_data_br) if "data_emissao" in df_notas_sel.columns else "",
         "Valor": df_notas_sel["valor_nf"].map(formatar_moeda_br),
         "Chave de acesso": df_notas_sel.get("chave_acesso", ""),
         "Observação": df_notas_sel.get("observacao", ""),
