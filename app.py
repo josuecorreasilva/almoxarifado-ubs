@@ -1880,6 +1880,7 @@ def rotulo_empenho(linha):
 def abrir_empenho_lista(empenho_id):
     st.session_state.empenho_aberto = int(empenho_id)
     st.session_state.nota_aberta = None
+    st.session_state.mostrar_notas_empenho = False
     st.rerun()
 
 
@@ -2031,8 +2032,8 @@ def render_painel_empenhos(usuario_atual):
                             resposta = supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
                             nova_id = (resposta.data or [{}])[0].get("id")
                             st.session_state.empenho_aberto = int(empenho_nf["id"])
-                            if nova_id:
-                                st.session_state.nota_aberta = int(nova_id)
+                            st.session_state.mostrar_notas_empenho = False
+                            st.session_state.nota_aberta = None
                             registrar_auditoria(
                                 "CADASTRO_NF",
                                 "sispac_notas_fiscais",
@@ -2130,7 +2131,7 @@ def render_painel_empenhos(usuario_atual):
                         abrir_empenho_lista(emp_id)
 
     if not aberto_id:
-        st.info("Clique no texto de um empenho para abrir os documentos e as notas.")
+        st.info("Clique no texto de um empenho para abrir o documento.")
         return
 
     empenho_ver = next((r for r in df_lista.to_dict("records") if int(r["id"]) == int(aberto_id)), None)
@@ -2180,8 +2181,21 @@ def render_painel_empenhos(usuario_atual):
             except Exception as e:
                 st.error(f"Não foi possível gravar o PDF. Rode o SQL `sispac_empenhos.sql` se o bucket ainda não existir. ({e})")
 
+    qtd_notas_emp = int(empenho_ver.get("notas") or qtd_nf.get(empenho_ver["id"], 0) or 0)
+    if st.session_state.get("mostrar_notas_empenho"):
+        if st.button("Ocultar notas", key=f"btn_ocultar_notas_{empenho_ver['id']}"):
+            st.session_state.mostrar_notas_empenho = False
+            st.session_state.nota_aberta = None
+            st.rerun()
+    else:
+        if st.button(f"Ver notas deste empenho ({qtd_notas_emp})", key=f"btn_ver_notas_{empenho_ver['id']}"):
+            st.session_state.mostrar_notas_empenho = True
+            st.rerun()
+
+    if not st.session_state.get("mostrar_notas_empenho"):
+        return
+
     st.markdown("##### Notas do empenho selecionado")
-    st.caption("Clique no texto da nota para selecioná-la e anexar o PDF.")
     df_notas_sel, _ = carregar_notas_empenho(empenho_ver["id"])
     if df_notas_sel is None or df_notas_sel.empty:
         st.info("Ainda não há nota fiscal neste empenho.")
