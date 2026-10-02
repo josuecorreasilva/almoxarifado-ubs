@@ -264,19 +264,72 @@ st.markdown("""
         text-decoration: line-through;
         color: #7b241c;
     }
-    .linha-pedido.linha-sel {
+    .linha-pedido.linha-sel,
+    .linha-empenho.linha-sel {
         background: #e8f4f5;
+    }
+    .st-key-lista_empenhos,
+    .st-key-lista_notas_emp,
+    .st-key-lista_empenhos [data-testid="stVerticalBlock"],
+    .st-key-lista_notas_emp [data-testid="stVerticalBlock"],
+    .st-key-lista_empenhos [data-testid="stMarkdownContainer"],
+    .st-key-lista_notas_emp [data-testid="stMarkdownContainer"],
+    .st-key-lista_empenhos [data-testid="stElementContainer"],
+    .st-key-lista_notas_emp [data-testid="stElementContainer"] {
+        width: 100% !important;
+        max-width: 100% !important;
     }
     .st-key-lista_empenhos p,
     .st-key-lista_notas_emp p {
         text-align: left !important;
-        margin: 0.35rem 0 !important;
+        margin: 0.2rem 0 !important;
     }
     .st-key-lista_empenhos [data-testid="stHorizontalBlock"] > div:first-child,
     .st-key-lista_notas_emp [data-testid="stHorizontalBlock"] > div:first-child {
         position: relative !important;
         text-align: left !important;
+        width: 100% !important;
+        flex: 1 1 auto !important;
     }
+    .st-key-lista_empenhos div.stButton > button,
+    .st-key-lista_notas_emp div.stButton > button {
+        font-size: 0.8rem !important;
+        padding: 0.25rem 0.45rem !important;
+        min-height: 0 !important;
+    }
+    .linha-empenho {
+        display: grid !important;
+        grid-template-columns: 1.35fr 2.4fr 1.1fr 0.85fr 0.9fr 1fr;
+        align-items: center;
+        width: 100% !important;
+        max-width: 100% !important;
+        gap: 10px 16px;
+        padding: 12px 10px !important;
+        border-bottom: 1px solid #d5d8dc;
+        box-sizing: border-box;
+        font-size: 0.92rem;
+        line-height: 1.35;
+        color: #1c2833;
+        cursor: pointer;
+    }
+    .linha-nota {
+        grid-template-columns: 1.6fr 1.2fr 1.2fr 1fr;
+    }
+    .linha-empenho-cab {
+        font-weight: 700;
+        color: #2c3e50;
+        background: #f4f6f7;
+        border-bottom: 1px solid #bdc3c7;
+        cursor: default;
+    }
+    .linha-empenho > span {
+        min-width: 0;
+        display: block;
+        overflow-wrap: anywhere;
+        text-align: left !important;
+    }
+    .linha-empenho .emp-num { font-weight: 700; }
+    .linha-empenho .emp-meta { color: #5d6d6e; }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
         font-weight: 500 !important;
@@ -1764,12 +1817,36 @@ def bloco_pdf_registro(rotulo, caminho, nome, chave_dl):
             st.caption("Não foi possível baixar o arquivo agora.")
 
 
-def html_linha_empenho(numero, fornecedor, meta):
+def html_linha_empenho(numero, fornecedor, valor, notas, pdf, data, cabecalho=False, selecionado=False):
+    classes = "linha-empenho"
+    if cabecalho:
+        classes += " linha-empenho-cab"
+    if selecionado:
+        classes += " linha-sel"
     return (
-        "<div class='linha-pedido'>"
-        f"<span class='ped-num'>{html_seguro(numero)}</span>"
-        f"<span class='ped-ubs'>{html_seguro(fornecedor)}</span>"
-        f"<span class='ped-meta'>{html_seguro(meta)}</span>"
+        f"<div class='{classes}'>"
+        f"<span class='emp-num'>{html_seguro(numero)}</span>"
+        f"<span class='emp-forn'>{html_seguro(fornecedor)}</span>"
+        f"<span class='emp-valor'>{html_seguro(valor)}</span>"
+        f"<span class='emp-notas'>{html_seguro(notas)}</span>"
+        f"<span class='emp-pdf'>{html_seguro(pdf)}</span>"
+        f"<span class='emp-data emp-meta'>{html_seguro(data)}</span>"
+        "</div>"
+    )
+
+
+def html_linha_nota(numero, emissao, valor, pdf, cabecalho=False, selecionado=False):
+    classes = "linha-empenho linha-nota"
+    if cabecalho:
+        classes += " linha-empenho-cab"
+    if selecionado:
+        classes += " linha-sel"
+    return (
+        f"<div class='{classes}'>"
+        f"<span class='emp-num'>{html_seguro(numero)}</span>"
+        f"<span class='emp-forn'>{html_seguro(emissao)}</span>"
+        f"<span class='emp-valor'>{html_seguro(valor)}</span>"
+        f"<span class='emp-pdf emp-meta'>{html_seguro(pdf)}</span>"
         "</div>"
     )
 
@@ -2004,35 +2081,40 @@ def render_painel_empenhos(usuario_atual):
 
     aberto_id = st.session_state.get("empenho_aberto")
     with st.container(key="lista_empenhos"):
-        st.markdown(
-            "<div class='linha-pedido linha-pedido-cab'>"
-            "<span class='ped-num'>Empenho</span>"
-            "<span class='ped-ubs'>Fornecedor</span>"
-            "<span class='ped-meta'>Valor · notas · PDF</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        cab_txt, cab_btn = st.columns([8.8, 1.2])
+        with cab_txt:
+            st.markdown(
+                html_linha_empenho("Empenho", "Fornecedor", "Valor", "Notas", "PDF", "Data", cabecalho=True),
+                unsafe_allow_html=True,
+            )
+        with cab_btn:
+            st.write("")
         for i, row in df_lista.iterrows():
             emp_id = int(row["id"])
             numero = f"{row.get('numero_empenho')}/{row.get('ano')}"
             fornecedor = str(row.get("fornecedor") or "")
-            tem_pdf = "PDF" if str(row.get("pdf_caminho") or "").strip() else "sem PDF"
-            meta = (
-                f"{formatar_moeda_br(row.get('valor_empenho'))} · "
-                f"{int(row.get('notas') or 0)} nota(s) · {tem_pdf} · "
-                f"{formatar_data_br(row.get('data_empenho'))}"
-            )
-            classe = "linha-pedido linha-sel" if aberto_id == emp_id else "linha-pedido"
-            st.markdown(
-                f"<div class='{classe}'>"
-                f"<span class='ped-num'>{html_seguro(numero)}</span>"
-                f"<span class='ped-ubs'>{html_seguro(fornecedor)}</span>"
-                f"<span class='ped-meta'>{html_seguro(meta)}</span>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            with st.container(key=f"hit_emp_{i}_{emp_id}"):
-                if st.button("Selecionar empenho", key=f"emp_txt_{i}_{emp_id}", use_container_width=True):
+            tem_pdf = "Com PDF" if str(row.get("pdf_caminho") or "").strip() else "Sem PDF"
+            qtd_notas = f"{int(row.get('notas') or 0)}"
+            selecionado = aberto_id == emp_id
+            c_txt, c_abrir = st.columns([8.8, 1.2])
+            with c_txt:
+                st.markdown(
+                    html_linha_empenho(
+                        numero,
+                        fornecedor,
+                        formatar_moeda_br(row.get("valor_empenho")),
+                        qtd_notas,
+                        tem_pdf,
+                        formatar_data_br(row.get("data_empenho")),
+                        selecionado=selecionado,
+                    ),
+                    unsafe_allow_html=True,
+                )
+                with st.container(key=f"hit_emp_{i}_{emp_id}"):
+                    if st.button("Selecionar empenho", key=f"emp_txt_{i}_{emp_id}", use_container_width=True):
+                        abrir_empenho_lista(emp_id)
+            with c_abrir:
+                if st.button("Abrir", key=f"emp_abrir_{i}_{emp_id}", use_container_width=True):
                     abrir_empenho_lista(emp_id)
 
     if not aberto_id:
@@ -2096,33 +2178,39 @@ def render_painel_empenhos(usuario_atual):
     df_notas_sel = df_notas_sel.reset_index(drop=True)
     nota_aberta = st.session_state.get("nota_aberta")
     with st.container(key="lista_notas_emp"):
-        st.markdown(
-            "<div class='linha-pedido linha-pedido-cab'>"
-            "<span class='ped-num'>Nota</span>"
-            "<span class='ped-ubs'>Emissão</span>"
-            "<span class='ped-meta'>Valor · PDF</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        cab_nf, cab_nf_btn = st.columns([8.8, 1.2])
+        with cab_nf:
+            st.markdown(
+                html_linha_nota("Nota", "Emissão", "Valor", "PDF", cabecalho=True),
+                unsafe_allow_html=True,
+            )
+        with cab_nf_btn:
+            st.write("")
         for i, row in df_notas_sel.iterrows():
             nota_id = int(row["id"])
             numero_nf = str(row.get("numero_nf") or "")
             serie = str(row.get("serie") or "").strip()
             if serie:
                 numero_nf = f"{numero_nf} s/{serie}"
-            tem_pdf = "PDF" if str(row.get("pdf_caminho") or "").strip() else "sem PDF"
-            meta = f"{formatar_moeda_br(row.get('valor_nf'))} · {tem_pdf}"
-            classe = "linha-pedido linha-sel" if nota_aberta == nota_id else "linha-pedido"
-            st.markdown(
-                f"<div class='{classe}'>"
-                f"<span class='ped-num'>{html_seguro(numero_nf)}</span>"
-                f"<span class='ped-ubs'>{html_seguro(formatar_data_br(row.get('data_emissao')))}</span>"
-                f"<span class='ped-meta'>{html_seguro(meta)}</span>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            with st.container(key=f"hit_nf_{i}_{nota_id}"):
-                if st.button("Selecionar nota", key=f"nf_txt_{i}_{nota_id}", use_container_width=True):
+            tem_pdf = "Com PDF" if str(row.get("pdf_caminho") or "").strip() else "Sem PDF"
+            selecionado = nota_aberta == nota_id
+            c_txt, c_abrir = st.columns([8.8, 1.2])
+            with c_txt:
+                st.markdown(
+                    html_linha_nota(
+                        numero_nf,
+                        formatar_data_br(row.get("data_emissao")),
+                        formatar_moeda_br(row.get("valor_nf")),
+                        tem_pdf,
+                        selecionado=selecionado,
+                    ),
+                    unsafe_allow_html=True,
+                )
+                with st.container(key=f"hit_nf_{i}_{nota_id}"):
+                    if st.button("Selecionar nota", key=f"nf_txt_{i}_{nota_id}", use_container_width=True):
+                        abrir_nota_lista(nota_id)
+            with c_abrir:
+                if st.button("Abrir", key=f"nf_abrir_{i}_{nota_id}", use_container_width=True):
                     abrir_nota_lista(nota_id)
 
     if not nota_aberta:
