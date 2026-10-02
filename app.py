@@ -178,21 +178,33 @@ st.markdown("""
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] {
         min-height: 1.3rem !important;
     }
+    .st-key-lista_pedidos [data-testid="stVerticalBlock"] {
+        gap: 0 !important;
+    }
+    .st-key-lista_pedidos [data-testid="stHorizontalBlock"] {
+        gap: 0.35rem !important;
+        align-items: center !important;
+        min-height: 28px !important;
+        margin: 0 !important;
+    }
     .st-key-lista_pedidos p {
         text-align: left !important;
-        margin: 0.35rem 0 !important;
+        margin: 0 !important;
+        line-height: 1.25 !important;
     }
     .st-key-lista_pedidos [data-testid="stColumn"],
     .st-key-lista_pedidos [data-testid="column"] {
-        align-items: stretch !important;
+        align-items: center !important;
         justify-content: flex-start !important;
         text-align: left !important;
+        padding: 0 !important;
     }
     .st-key-lista_pedidos [data-testid="stColumn"] > div,
     .st-key-lista_pedidos [data-testid="column"] > div {
         width: 100% !important;
         align-items: stretch !important;
         text-align: left !important;
+        gap: 0 !important;
     }
     .st-key-lista_pedidos [data-testid="stMarkdown"],
     .st-key-lista_pedidos [data-testid="stMarkdownContainer"],
@@ -200,27 +212,32 @@ st.markdown("""
         width: 100% !important;
         text-align: left !important;
         display: block !important;
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
     }
     .st-key-lista_pedidos [data-testid="stHorizontalBlock"] > div:first-child {
         position: relative !important;
         text-align: left !important;
     }
     .st-key-lista_pedidos div.stButton > button {
-        font-size: 0.8rem !important;
-        padding: 0.25rem 0.45rem !important;
-        min-height: 0 !important;
+        font-size: 0.78rem !important;
+        padding: 0.1rem 0.4rem !important;
+        min-height: 26px !important;
+        height: 26px !important;
+        line-height: 1.2 !important;
     }
-    [class*="st-key-hit_"] {
+    .st-key-lista_pedidos [class*="st-key-hit_"] {
         position: absolute !important;
         left: 0 !important;
         right: 0 !important;
         top: 0 !important;
-        height: 44px !important;
+        height: 28px !important;
         z-index: 6 !important;
     }
-    [class*="st-key-hit_"] div.stButton > button {
+    .st-key-lista_pedidos [class*="st-key-hit_"] div.stButton > button {
         width: 100% !important;
-        height: 44px !important;
+        height: 28px !important;
+        min-height: 28px !important;
         opacity: 0 !important;
         cursor: pointer !important;
         border: none !important;
@@ -233,12 +250,13 @@ st.markdown("""
         width: 100% !important;
         max-width: 100% !important;
         text-align: left !important;
-        gap: 16px;
-        padding: 10px 8px !important;
+        gap: 10px;
+        padding: 3px 8px !important;
+        min-height: 26px;
         border-bottom: 1px solid #d5d8dc;
         box-sizing: border-box;
-        font-size: 0.92rem;
-        line-height: 1.35;
+        font-size: 0.84rem;
+        line-height: 1.25;
         color: #1c2833;
     }
     .linha-pedido-cab {
