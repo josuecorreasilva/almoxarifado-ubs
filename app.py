@@ -264,6 +264,19 @@ st.markdown("""
         text-decoration: line-through;
         color: #7b241c;
     }
+    .linha-pedido.linha-sel {
+        background: #e8f4f5;
+    }
+    .st-key-lista_empenhos p,
+    .st-key-lista_notas_emp p {
+        text-align: left !important;
+        margin: 0.35rem 0 !important;
+    }
+    .st-key-lista_empenhos [data-testid="stHorizontalBlock"] > div:first-child,
+    .st-key-lista_notas_emp [data-testid="stHorizontalBlock"] > div:first-child {
+        position: relative !important;
+        text-align: left !important;
+    }
     .st-key-catalogo_marcacao [data-testid="stCheckbox"] label {
         cursor: pointer !important;
         font-weight: 500 !important;
@@ -1668,6 +1681,99 @@ def carregar_notas_empenho(empenho_id=None):
         return pd.DataFrame(), e
 
 
+BUCKET_DOCUMENTOS = "sispac-documentos"
+TIPOS_PDF_EMPENHO = ["pdf", "png", "jpg", "jpeg"]
+
+
+def mime_arquivo(nome):
+    nome = str(nome or "").lower()
+    if nome.endswith(".png"):
+        return "image/png"
+    if nome.endswith(".jpg") or nome.endswith(".jpeg"):
+        return "image/jpeg"
+    return "application/pdf"
+
+
+def extensao_arquivo(nome):
+    nome = str(nome or "").lower()
+    if nome.endswith(".png"):
+        return "png"
+    if nome.endswith(".jpg") or nome.endswith(".jpeg"):
+        return "jpg"
+    return "pdf"
+
+
+def enviar_pdf_sispac(arquivo, pasta, nome_base):
+    if arquivo is None:
+        return None, None
+    conteudo = arquivo.getvalue()
+    if not conteudo:
+        return None, None
+    if len(conteudo) > 15 * 1024 * 1024:
+        raise RuntimeError("O arquivo ultrapassa 15 MB. Envie um PDF ou imagem menor.")
+    ext = extensao_arquivo(arquivo.name)
+    caminho = f"{pasta}/{slug_arquivo(nome_base)}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+    supabase.storage.from_(BUCKET_DOCUMENTOS).upload(
+        caminho,
+        conteudo,
+        {"content-type": mime_arquivo(arquivo.name), "upsert": "true"},
+    )
+    return caminho, str(arquivo.name)
+
+
+def url_documento_sispac(caminho):
+    if not caminho:
+        return None
+    try:
+        return supabase.storage.from_(BUCKET_DOCUMENTOS).get_public_url(caminho)
+    except Exception:
+        return None
+
+
+def gravar_pdf_registro(tabela, registro_id, caminho, nome):
+    supabase.table(tabela).update({
+        "pdf_caminho": caminho,
+        "pdf_nome": nome,
+    }).eq("id", int(registro_id)).execute()
+
+
+def bloco_pdf_registro(rotulo, caminho, nome, chave_dl):
+    if not caminho:
+        st.caption(f"{rotulo}: nenhum arquivo ainda.")
+        return
+    nome_exibir = nome or "documento.pdf"
+    url = url_documento_sispac(caminho)
+    c1, c2 = st.columns([1.4, 1.4])
+    with c1:
+        if url:
+            st.link_button(f"Abrir {rotulo}", url, use_container_width=True)
+        else:
+            st.caption("Link do arquivo indisponível.")
+    with c2:
+        try:
+            dados = supabase.storage.from_(BUCKET_DOCUMENTOS).download(caminho)
+            st.download_button(
+                f"Baixar {rotulo}",
+                data=dados,
+                file_name=nome_exibir,
+                mime=mime_arquivo(nome_exibir),
+                key=chave_dl,
+                use_container_width=True,
+            )
+        except Exception:
+            st.caption("Não foi possível baixar o arquivo agora.")
+
+
+def html_linha_empenho(numero, fornecedor, meta):
+    return (
+        "<div class='linha-pedido'>"
+        f"<span class='ped-num'>{html_seguro(numero)}</span>"
+        f"<span class='ped-ubs'>{html_seguro(fornecedor)}</span>"
+        f"<span class='ped-meta'>{html_seguro(meta)}</span>"
+        "</div>"
+    )
+
+
 def rotulo_empenho(linha):
     numero = str(linha.get("numero_empenho") or "").strip()
     ano = linha.get("ano") or ""
@@ -1677,11 +1783,22 @@ def rotulo_empenho(linha):
     return f"{numero}/{ano}"
 
 
+def abrir_empenho_lista(empenho_id):
+    st.session_state.empenho_aberto = int(empenho_id)
+    st.session_state.nota_aberta = None
+    st.rerun()
+
+
+def abrir_nota_lista(nota_id):
+    st.session_state.nota_aberta = int(nota_id)
+    st.rerun()
+
+
 def render_painel_empenhos(usuario_atual):
     st.markdown("#### Empenhos e notas fiscais")
     st.caption(
         "Neste espaço entra só o empenho e as notas fiscais ligadas a ele. "
-        "O cadastro de material, o lote e o pedido continuam nas outras abas."
+        "Clique no texto da linha para selecionar. Anexe o PDF do empenho e da nota digitalizada."
     )
 
     df_empenhos, erro_emp = carregar_empenhos()
@@ -1706,29 +1823,56 @@ def render_painel_empenhos(usuario_atual):
             valor_emp = campo_valor_reais("Valor do empenho (R$)", chave="valor_empenho_txt")
             objeto_emp = st.text_area("Objeto / descrição (opcional)", height=80)
             obs_emp = st.text_input("Observação (opcional)")
+            pdf_emp = st.file_uploader(
+                "PDF do empenho (digitalizado)",
+                type=TIPOS_PDF_EMPENHO,
+                key="pdf_novo_empenho",
+            )
             if st.form_submit_button("Registrar empenho"):
                 numero_limpo = str(numero_emp or "").strip()
                 if not numero_limpo:
                     st.error("Informe o número do empenho.")
                 else:
+                    pdf_caminho = None
+                    pdf_nome = None
                     try:
-                        supabase.table("sispac_empenhos").insert({
-                            "numero_empenho": numero_limpo,
-                            "ano": int(data_emp.year),
-                            "data_empenho": data_emp.strftime("%Y-%m-%d"),
-                            "fornecedor": str(fornecedor_emp or "").strip(),
-                            "cnpj": str(cnpj_emp or "").strip(),
-                            "objeto": str(objeto_emp or "").strip(),
-                            "valor_empenho": float(valor_emp or 0),
-                            "observacao": str(obs_emp or "").strip(),
-                            "criado_por": usuario_atual,
-                        }).execute()
+                        pdf_caminho, pdf_nome = enviar_pdf_sispac(pdf_emp, "empenhos", numero_limpo)
+                    except Exception as e:
+                        st.warning(f"O empenho será salvo, mas o PDF não entrou: {e}")
+                    dados_emp = {
+                        "numero_empenho": numero_limpo,
+                        "ano": int(data_emp.year),
+                        "data_empenho": data_emp.strftime("%Y-%m-%d"),
+                        "fornecedor": str(fornecedor_emp or "").strip(),
+                        "cnpj": str(cnpj_emp or "").strip(),
+                        "objeto": str(objeto_emp or "").strip(),
+                        "valor_empenho": float(valor_emp or 0),
+                        "observacao": str(obs_emp or "").strip(),
+                        "criado_por": usuario_atual,
+                    }
+                    if pdf_caminho:
+                        dados_emp["pdf_caminho"] = pdf_caminho
+                        dados_emp["pdf_nome"] = pdf_nome
+                    try:
+                        resposta = supabase.table("sispac_empenhos").insert(dados_emp).execute()
+                        novo_id = (resposta.data or [{}])[0].get("id")
+                        if novo_id:
+                            st.session_state.empenho_aberto = int(novo_id)
                         registrar_auditoria("CADASTRO_EMPENHO", "sispac_empenhos", numero_limpo)
                         st.success(f"Empenho {numero_limpo} registrado.")
                         st.rerun()
                     except Exception as e:
                         if "duplicate" in str(e).lower() or "23505" in str(e):
                             st.error("Este número de empenho já está cadastrado neste ano.")
+                        elif "pdf_caminho" in str(e).lower() or "pgrst" in str(e).lower():
+                            try:
+                                dados_emp.pop("pdf_caminho", None)
+                                dados_emp.pop("pdf_nome", None)
+                                supabase.table("sispac_empenhos").insert(dados_emp).execute()
+                                st.warning("Empenho salvo. Rode de novo o SQL `sispac_empenhos.sql` para gravar o PDF.")
+                                st.rerun()
+                            except Exception as e2:
+                                st.error(f"Não foi possível registrar o empenho: {e2}")
                         else:
                             st.error(f"Não foi possível registrar o empenho: {e}")
 
@@ -1739,7 +1883,12 @@ def render_painel_empenhos(usuario_atual):
         else:
             opcoes_emp = df_empenhos.to_dict("records")
             rotulos = [rotulo_empenho(r) for r in opcoes_emp]
-            escolha = st.selectbox("Empenho", rotulos, key="sel_empenho_nota")
+            ids_emp = [int(r["id"]) for r in opcoes_emp]
+            idx_padrao = 0
+            aberto = st.session_state.get("empenho_aberto")
+            if aberto in ids_emp:
+                idx_padrao = ids_emp.index(aberto)
+            escolha = st.selectbox("Empenho", rotulos, index=idx_padrao, key="sel_empenho_nota")
             empenho_nf = opcoes_emp[rotulos.index(escolha)]
             with st.form("form_nova_nota"):
                 numero_nf = st.text_input("Número da nota fiscal")
@@ -1751,22 +1900,45 @@ def render_painel_empenhos(usuario_atual):
                 valor_nf = campo_valor_reais("Valor da nota (R$)", chave="valor_nota_txt")
                 chave_nf = st.text_input("Chave de acesso (opcional)")
                 obs_nf = st.text_input("Observação da nota (opcional)")
+                pdf_nf = st.file_uploader(
+                    "PDF da nota fiscal digitalizada",
+                    type=TIPOS_PDF_EMPENHO,
+                    key="pdf_nova_nota",
+                )
                 if st.form_submit_button("Lançar nota no empenho"):
                     numero_nf_limpo = str(numero_nf or "").strip()
                     if not numero_nf_limpo:
                         st.error("Informe o número da nota fiscal.")
                     else:
+                        pdf_caminho = None
+                        pdf_nome = None
                         try:
-                            supabase.table("sispac_notas_fiscais").insert({
-                                "empenho_id": int(empenho_nf["id"]),
-                                "numero_nf": numero_nf_limpo,
-                                "serie": str(serie_nf or "").strip(),
-                                "data_emissao": data_nf.strftime("%Y-%m-%d"),
-                                "valor_nf": float(valor_nf or 0),
-                                "chave_acesso": str(chave_nf or "").strip(),
-                                "observacao": str(obs_nf or "").strip(),
-                                "criado_por": usuario_atual,
-                            }).execute()
+                            pdf_caminho, pdf_nome = enviar_pdf_sispac(
+                                pdf_nf,
+                                f"notas/{empenho_nf.get('numero_empenho')}",
+                                numero_nf_limpo,
+                            )
+                        except Exception as e:
+                            st.warning(f"A nota será salva, mas o PDF não entrou: {e}")
+                        dados_nf = {
+                            "empenho_id": int(empenho_nf["id"]),
+                            "numero_nf": numero_nf_limpo,
+                            "serie": str(serie_nf or "").strip(),
+                            "data_emissao": data_nf.strftime("%Y-%m-%d"),
+                            "valor_nf": float(valor_nf or 0),
+                            "chave_acesso": str(chave_nf or "").strip(),
+                            "observacao": str(obs_nf or "").strip(),
+                            "criado_por": usuario_atual,
+                        }
+                        if pdf_caminho:
+                            dados_nf["pdf_caminho"] = pdf_caminho
+                            dados_nf["pdf_nome"] = pdf_nome
+                        try:
+                            resposta = supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
+                            nova_id = (resposta.data or [{}])[0].get("id")
+                            st.session_state.empenho_aberto = int(empenho_nf["id"])
+                            if nova_id:
+                                st.session_state.nota_aberta = int(nova_id)
                             registrar_auditoria(
                                 "CADASTRO_NF",
                                 "sispac_notas_fiscais",
@@ -1777,11 +1949,21 @@ def render_painel_empenhos(usuario_atual):
                         except Exception as e:
                             if "duplicate" in str(e).lower() or "23505" in str(e):
                                 st.error("Esta nota (número e série) já está lançada neste empenho.")
+                            elif "pdf_caminho" in str(e).lower():
+                                try:
+                                    dados_nf.pop("pdf_caminho", None)
+                                    dados_nf.pop("pdf_nome", None)
+                                    supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
+                                    st.warning("Nota salva. Rode de novo o SQL `sispac_empenhos.sql` para gravar o PDF.")
+                                    st.rerun()
+                                except Exception as e2:
+                                    st.error(f"Não foi possível lançar a nota: {e2}")
                             else:
                                 st.error(f"Não foi possível lançar a nota: {e}")
 
     st.markdown("---")
     st.markdown("##### Empenhos registrados")
+    st.caption("Clique no texto da linha para selecionar o empenho.")
     if df_empenhos.empty:
         st.info("Nenhum empenho cadastrado ainda.")
         return
@@ -1818,27 +2000,58 @@ def render_painel_empenhos(usuario_atual):
     df_lista["notas"] = df_lista["id"].map(lambda i: int(qtd_nf.get(i, 0)))
     df_lista["valor_notas"] = df_lista["id"].map(lambda i: float(soma_nf.get(i, 0.0)))
     df_lista["saldo"] = df_lista["valor_empenho"] - df_lista["valor_notas"]
-    df_exibir = pd.DataFrame({
-        "Empenho": df_lista["numero_empenho"].astype(str),
-        "Ano": df_lista["ano"],
-        "Data": df_lista["data_empenho"].map(formatar_data_br),
-        "Fornecedor": df_lista.get("fornecedor", ""),
-        "Valor empenho": df_lista["valor_empenho"].map(formatar_moeda_br),
-        "Notas": df_lista["notas"],
-        "Valor das notas": df_lista["valor_notas"].map(formatar_moeda_br),
-        "Saldo (empenho − notas)": df_lista["saldo"].map(formatar_moeda_br),
-    })
-    st.dataframe(df_exibir, use_container_width=True, hide_index=True)
+    df_lista = df_lista.reset_index(drop=True)
 
-    st.markdown("##### Notas do empenho selecionado")
-    opcoes_ver = df_lista.to_dict("records")
-    rotulos_ver = [rotulo_empenho(r) for r in opcoes_ver]
-    escolha_ver = st.selectbox("Ver notas de", rotulos_ver, key="sel_empenho_ver")
-    empenho_ver = opcoes_ver[rotulos_ver.index(escolha_ver)]
+    aberto_id = st.session_state.get("empenho_aberto")
+    with st.container(key="lista_empenhos"):
+        st.markdown(
+            "<div class='linha-pedido linha-pedido-cab'>"
+            "<span class='ped-num'>Empenho</span>"
+            "<span class='ped-ubs'>Fornecedor</span>"
+            "<span class='ped-meta'>Valor · notas · PDF</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        for i, row in df_lista.iterrows():
+            emp_id = int(row["id"])
+            numero = f"{row.get('numero_empenho')}/{row.get('ano')}"
+            fornecedor = str(row.get("fornecedor") or "")
+            tem_pdf = "PDF" if str(row.get("pdf_caminho") or "").strip() else "sem PDF"
+            meta = (
+                f"{formatar_moeda_br(row.get('valor_empenho'))} · "
+                f"{int(row.get('notas') or 0)} nota(s) · {tem_pdf} · "
+                f"{formatar_data_br(row.get('data_empenho'))}"
+            )
+            classe = "linha-pedido linha-sel" if aberto_id == emp_id else "linha-pedido"
+            st.markdown(
+                f"<div class='{classe}'>"
+                f"<span class='ped-num'>{html_seguro(numero)}</span>"
+                f"<span class='ped-ubs'>{html_seguro(fornecedor)}</span>"
+                f"<span class='ped-meta'>{html_seguro(meta)}</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            with st.container(key=f"hit_emp_{i}_{emp_id}"):
+                if st.button("Selecionar empenho", key=f"emp_txt_{i}_{emp_id}", use_container_width=True):
+                    abrir_empenho_lista(emp_id)
+
+    if not aberto_id:
+        st.info("Clique no texto de um empenho para abrir os documentos e as notas.")
+        return
+
+    empenho_ver = next((r for r in df_lista.to_dict("records") if int(r["id"]) == int(aberto_id)), None)
+    if empenho_ver is None:
+        empenho_ver = next((r for r in df_empenhos.to_dict("records") if int(r["id"]) == int(aberto_id)), None)
+    if empenho_ver is None:
+        st.session_state.empenho_aberto = None
+        st.info("Clique no texto de um empenho para abrir.")
+        return
+
     valor_emp_sel = float(empenho_ver.get("valor_empenho") or 0)
     valor_nf_sel = float(soma_nf.get(empenho_ver["id"], 0.0))
+    st.markdown("##### Empenho selecionado")
     st.caption(
-        f"Empenho {empenho_ver.get('numero_empenho')} — "
+        f"{empenho_ver.get('numero_empenho')} — "
         f"valor {formatar_moeda_br(valor_emp_sel)} · "
         f"notas {formatar_moeda_br(valor_nf_sel)} · "
         f"saldo {formatar_moeda_br(valor_emp_sel - valor_nf_sel)}"
@@ -1847,20 +2060,110 @@ def render_painel_empenhos(usuario_atual):
     if objeto_txt:
         st.caption(f"Objeto: {objeto_txt}")
 
+    bloco_pdf_registro(
+        "PDF do empenho",
+        empenho_ver.get("pdf_caminho"),
+        empenho_ver.get("pdf_nome"),
+        f"dl_emp_{empenho_ver['id']}",
+    )
+    pdf_emp_extra = st.file_uploader(
+        "Incluir ou substituir PDF do empenho",
+        type=TIPOS_PDF_EMPENHO,
+        key=f"pdf_anexo_emp_{empenho_ver['id']}",
+    )
+    if st.button("Salvar PDF do empenho", key=f"btn_pdf_emp_{empenho_ver['id']}"):
+        if pdf_emp_extra is None:
+            st.warning("Escolha o arquivo digitalizado do empenho.")
+        else:
+            try:
+                caminho, nome = enviar_pdf_sispac(
+                    pdf_emp_extra, "empenhos", empenho_ver.get("numero_empenho")
+                )
+                gravar_pdf_registro("sispac_empenhos", empenho_ver["id"], caminho, nome)
+                registrar_auditoria("PDF_EMPENHO", "sispac_empenhos", empenho_ver.get("numero_empenho"))
+                st.success("PDF do empenho salvo.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível gravar o PDF. Rode o SQL `sispac_empenhos.sql` se o bucket ainda não existir. ({e})")
+
+    st.markdown("##### Notas do empenho selecionado")
+    st.caption("Clique no texto da nota para selecioná-la e anexar o PDF.")
     df_notas_sel, _ = carregar_notas_empenho(empenho_ver["id"])
     if df_notas_sel is None or df_notas_sel.empty:
         st.info("Ainda não há nota fiscal neste empenho.")
         return
     df_notas_sel["valor_nf"] = pd.to_numeric(df_notas_sel.get("valor_nf"), errors="coerce").fillna(0.0)
-    df_nf_exibir = pd.DataFrame({
-        "Nota": df_notas_sel["numero_nf"].astype(str),
-        "Série": df_notas_sel.get("serie", ""),
-        "Emissão": df_notas_sel.get("data_emissao", pd.Series(dtype=str)).map(formatar_data_br) if "data_emissao" in df_notas_sel.columns else "",
-        "Valor": df_notas_sel["valor_nf"].map(formatar_moeda_br),
-        "Chave de acesso": df_notas_sel.get("chave_acesso", ""),
-        "Observação": df_notas_sel.get("observacao", ""),
-    })
-    st.dataframe(df_nf_exibir, use_container_width=True, hide_index=True)
+    df_notas_sel = df_notas_sel.reset_index(drop=True)
+    nota_aberta = st.session_state.get("nota_aberta")
+    with st.container(key="lista_notas_emp"):
+        st.markdown(
+            "<div class='linha-pedido linha-pedido-cab'>"
+            "<span class='ped-num'>Nota</span>"
+            "<span class='ped-ubs'>Emissão</span>"
+            "<span class='ped-meta'>Valor · PDF</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        for i, row in df_notas_sel.iterrows():
+            nota_id = int(row["id"])
+            numero_nf = str(row.get("numero_nf") or "")
+            serie = str(row.get("serie") or "").strip()
+            if serie:
+                numero_nf = f"{numero_nf} s/{serie}"
+            tem_pdf = "PDF" if str(row.get("pdf_caminho") or "").strip() else "sem PDF"
+            meta = f"{formatar_moeda_br(row.get('valor_nf'))} · {tem_pdf}"
+            classe = "linha-pedido linha-sel" if nota_aberta == nota_id else "linha-pedido"
+            st.markdown(
+                f"<div class='{classe}'>"
+                f"<span class='ped-num'>{html_seguro(numero_nf)}</span>"
+                f"<span class='ped-ubs'>{html_seguro(formatar_data_br(row.get('data_emissao')))}</span>"
+                f"<span class='ped-meta'>{html_seguro(meta)}</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            with st.container(key=f"hit_nf_{i}_{nota_id}"):
+                if st.button("Selecionar nota", key=f"nf_txt_{i}_{nota_id}", use_container_width=True):
+                    abrir_nota_lista(nota_id)
+
+    if not nota_aberta:
+        st.info("Clique no texto de uma nota para abrir o PDF digitalizado.")
+        return
+    nota_ver = next((r for r in df_notas_sel.to_dict("records") if int(r["id"]) == int(nota_aberta)), None)
+    if nota_ver is None:
+        st.session_state.nota_aberta = None
+        return
+
+    st.markdown("##### Nota selecionada")
+    st.caption(
+        f"NF {nota_ver.get('numero_nf')} — {formatar_moeda_br(nota_ver.get('valor_nf'))}"
+    )
+    bloco_pdf_registro(
+        "PDF da nota",
+        nota_ver.get("pdf_caminho"),
+        nota_ver.get("pdf_nome"),
+        f"dl_nf_{nota_ver['id']}",
+    )
+    pdf_nf_extra = st.file_uploader(
+        "Incluir ou substituir PDF da nota digitalizada",
+        type=TIPOS_PDF_EMPENHO,
+        key=f"pdf_anexo_nf_{nota_ver['id']}",
+    )
+    if st.button("Salvar PDF da nota", key=f"btn_pdf_nf_{nota_ver['id']}"):
+        if pdf_nf_extra is None:
+            st.warning("Escolha o arquivo digitalizado da nota.")
+        else:
+            try:
+                caminho, nome = enviar_pdf_sispac(
+                    pdf_nf_extra,
+                    f"notas/{empenho_ver.get('numero_empenho')}",
+                    nota_ver.get("numero_nf"),
+                )
+                gravar_pdf_registro("sispac_notas_fiscais", nota_ver["id"], caminho, nome)
+                registrar_auditoria("PDF_NF", "sispac_notas_fiscais", nota_ver.get("numero_nf"))
+                st.success("PDF da nota salvo.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível gravar o PDF. Rode o SQL `sispac_empenhos.sql` se o bucket ainda não existir. ({e})")
 
 
 def render_painel_estoque_ubs(modo_gestao=False):
