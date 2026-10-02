@@ -458,8 +458,24 @@ def filtrar_pedidos_por_numero(df, termo):
     return df[nums.str.contains(re.escape(termo), case=False, regex=True, na=False)]
 
 
+STATUS_PEDIDO_ENVIADO = "Pedido enviado"
+STATUS_SEPARADO = "Separado"
+STATUS_TRANSITO = "Em trânsito"
+STATUS_ATENDIDO_PARCIAL = "Atendido Parcialmente"
+STATUS_ATENDIDO_INTEGRAL = "Atendido Integralmente"
+STATUS_SAIU_CENTRAL = {STATUS_TRANSITO, STATUS_ATENDIDO_PARCIAL, STATUS_ATENDIDO_INTEGRAL}
+
+
 def pedido_concluido(status):
-    return str(status or "") in {"Atendido Parcialmente", "Atendido Integralmente"}
+    return str(status or "") in {STATUS_ATENDIDO_PARCIAL, STATUS_ATENDIDO_INTEGRAL}
+
+
+def pedido_separado(status):
+    return str(status or "") == STATUS_SEPARADO
+
+
+def pedido_em_transito(status):
+    return str(status or "") == STATUS_TRANSITO
 
 
 def status_pedido_unico(pedidos_unicos, numero):
@@ -469,18 +485,36 @@ def status_pedido_unico(pedidos_unicos, numero):
     return m["status"].iloc[0]
 
 
-def resolver_pedido_aberto(pedidos_unicos, so_pendentes, perfil):
+def resolver_pedido_aberto(pedidos_unicos, tipo_lista, perfil):
     pedido = st.session_state.get("pedido_aberto") or "Selecione..."
     if pedido == "Selecione..." or pedidos_unicos is None or pedidos_unicos.empty:
         return "Selecione..."
     if pedido not in set(pedidos_unicos["numero_pedido"].astype(str)):
         return "Selecione..."
     status = status_pedido_unico(pedidos_unicos, pedido)
-    if so_pendentes and pedido_concluido(status):
-        return "Selecione..."
-    if not so_pendentes and not pedido_concluido(status):
+    if not pedido_pertence_lista(status, tipo_lista, perfil):
         return "Selecione..."
     return pedido
+
+
+def tipo_lista_pedidos(rotulo, perfil):
+    texto = str(rotulo or "")
+    if texto.startswith("Despacho"):
+        return "despacho"
+    if texto.startswith("Conclu"):
+        return "concluidos"
+    return "pendentes"
+
+
+def pedido_pertence_lista(status, tipo_lista, perfil="GESTAO"):
+    status = str(status or STATUS_PEDIDO_ENVIADO)
+    if tipo_lista == "concluidos":
+        return pedido_concluido(status)
+    if tipo_lista == "despacho":
+        return pedido_separado(status) or pedido_em_transito(status)
+    if perfil == "UBS":
+        return not pedido_concluido(status)
+    return status in {STATUS_PEDIDO_ENVIADO, ""}
 
 
 def abrir_pedido_lista(numero, modo, imprimir=False):
@@ -506,7 +540,7 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
         return
     df_lista = df_lista.reset_index(drop=True)
     with st.container(key="lista_pedidos"):
-        cab, _espaco_cab = st.columns([8.5, 1.5]) if acao == "conferir" else st.columns([7.4, 2.6])
+        cab, _espaco_cab = st.columns([8.5, 1.5]) if acao in {"conferir", "despachar", "receber"} else st.columns([7.4, 2.6])
         with cab:
             st.markdown(
                 "<div class='linha-pedido linha-pedido-cab'>"
@@ -523,8 +557,8 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                 data_txt = data_txt[:16]
             ubs = str(row.get("ubs") or "")
             status = str(row.get("status") or "")
-            pode_abrir_texto = acao != "conferir" or st.session_state.perfil == "GESTAO"
-            if acao == "conferir":
+            pode_abrir_texto = True
+            if acao in {"conferir", "despachar", "receber"}:
                 c_txt, c_acao = st.columns([8.5, 1.5])
             else:
                 c_txt, c_ver, c_imp = st.columns([7.4, 1.3, 1.3])
@@ -533,12 +567,35 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                 if pode_abrir_texto:
                     with st.container(key=f"hit_{chave}_{i}"):
                         if st.button("Abrir pedido", key=f"{chave}_txt_{i}_{numero}", use_container_width=True):
-                            abrir_pedido_lista(numero, "conferir" if acao == "conferir" else "visualizar")
+                            modo = "visualizar"
+                            if acao == "conferir":
+                                modo = "conferir"
+                            elif acao == "despachar":
+                                modo = "despachar" if pedido_separado(status) else "visualizar"
+                            elif acao == "receber":
+                                modo = "receber" if pedido_em_transito(status) else "visualizar"
+                            abrir_pedido_lista(numero, modo)
             if acao == "conferir":
                 with c_acao:
                     if st.session_state.perfil == "GESTAO":
                         if st.button("Conferir", key=f"{chave}_conf_{i}_{numero}"):
                             abrir_pedido_lista(numero, "conferir")
+            elif acao == "despachar":
+                with c_acao:
+                    if pedido_separado(status):
+                        if st.button("Despachar", key=f"{chave}_desp_{i}_{numero}"):
+                            abrir_pedido_lista(numero, "despachar")
+                    else:
+                        if st.button("Ver", key=f"{chave}_ver_tr_{i}_{numero}"):
+                            abrir_pedido_lista(numero, "visualizar")
+            elif acao == "receber":
+                with c_acao:
+                    if pedido_em_transito(status):
+                        if st.button("Receber", key=f"{chave}_rec_{i}_{numero}"):
+                            abrir_pedido_lista(numero, "receber")
+                    else:
+                        if st.button("Ver", key=f"{chave}_ver_rc_{i}_{numero}"):
+                            abrir_pedido_lista(numero, "visualizar")
             else:
                 with c_ver:
                     if st.button("Visualizar", key=f"{chave}_ver_{i}_{numero}"):
@@ -550,12 +607,16 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
 
 def status_consolidado_pedido(df_itens):
     if df_itens is None or df_itens.empty or "status" not in df_itens.columns:
-        return "Pedido enviado"
+        return STATUS_PEDIDO_ENVIADO
     statuses = set(df_itens["status"].dropna().astype(str))
-    if "Atendido Parcialmente" in statuses:
-        return "Atendido Parcialmente"
-    if statuses and statuses.issubset({"Atendido Integralmente"}):
-        return "Atendido Integralmente"
+    if STATUS_ATENDIDO_PARCIAL in statuses:
+        return STATUS_ATENDIDO_PARCIAL
+    if statuses and statuses.issubset({STATUS_ATENDIDO_INTEGRAL}):
+        return STATUS_ATENDIDO_INTEGRAL
+    if STATUS_TRANSITO in statuses:
+        return STATUS_TRANSITO
+    if STATUS_SEPARADO in statuses:
+        return STATUS_SEPARADO
     return str(df_itens["status"].iloc[0])
 
 
@@ -1146,13 +1207,27 @@ def mapa_saidas_conferidas():
         resposta = supabase.table("pedidos").select("material,quantidade_entregue,status").execute()
         for linha in resposta.data or []:
             status = str(linha.get("status") or "")
-            if status not in {"Atendido Parcialmente", "Atendido Integralmente"}:
+            if status not in STATUS_SAIU_CENTRAL:
                 continue
             material = str(linha.get("material") or "").strip()
             saidas[material] = saidas.get(material, 0) + parse_numero(linha.get("quantidade_entregue"), inteiro=True)
     except Exception:
         pass
     return saidas
+
+
+def mapa_reservas_separadas():
+    reservas = {}
+    try:
+        resposta = supabase.table("pedidos").select("material,quantidade_entregue,status").execute()
+        for linha in resposta.data or []:
+            if str(linha.get("status") or "") != STATUS_SEPARADO:
+                continue
+            material = str(linha.get("material") or "").strip()
+            reservas[material] = reservas.get(material, 0) + parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+    except Exception:
+        pass
+    return reservas
 
 
 def mapa_estoque_lotes():
@@ -1171,17 +1246,19 @@ def mapa_estoque_lotes():
     return saldos, materiais_com_lote
 
 
-def estoque_visivel(material, estoque_planilha, saidas, saldos_lote, materiais_com_lote):
+def estoque_visivel(material, estoque_planilha, saidas, saldos_lote, materiais_com_lote, reservas=None):
     material = str(material or "").strip()
+    reservado = (reservas or {}).get(material, 0)
     if material in materiais_com_lote:
-        return max(0, saldos_lote.get(material, 0))
-    return max(0, parse_numero(estoque_planilha, inteiro=True) - saidas.get(material, 0))
+        return max(0, saldos_lote.get(material, 0) - reservado)
+    return max(0, parse_numero(estoque_planilha, inteiro=True) - (saidas or {}).get(material, 0) - reservado)
 
 
 def quadro_cadastro_estoque(df_fonte, col_cat, col_mat, col_preco, df_catalogo, col_mat_cat, col_est_cat, saidas, saldos_lote, materiais_com_lote):
     if df_fonte is None or df_fonte.empty:
         return pd.DataFrame(columns=["Categoria", "Material", "Valor unitário", "Estoque atual", "Valor total"])
     mapa_planilha = mapa_estoque_planilha(df_catalogo, col_mat_cat, col_est_cat)
+    reservas = mapa_reservas_separadas()
     linhas = []
     for _, row in df_fonte.iterrows():
         material = str(row.get(col_mat) or "").strip()
@@ -1195,6 +1272,7 @@ def quadro_cadastro_estoque(df_fonte, col_cat, col_mat, col_preco, df_catalogo, 
             saidas or {},
             saldos_lote or {},
             materiais_com_lote or set(),
+            reservas=reservas,
         )
         linhas.append({
             "Categoria": categoria,
@@ -1233,8 +1311,8 @@ def demanda_pendente_material(df_pedidos, material, numero_pedido_atual=None):
     for _, linha in df_pedidos.iterrows():
         if str(linha.get("material") or "").strip() != material:
             continue
-        status = str(linha.get("status") or "Pedido enviado")
-        if status in {"Atendido Parcialmente", "Atendido Integralmente"}:
+        status = str(linha.get("status") or STATUS_PEDIDO_ENVIADO)
+        if status != STATUS_PEDIDO_ENVIADO:
             continue
         quantidade = parse_numero(linha.get("quantidade"), inteiro=True)
         numero = str(linha.get("numero_pedido") or "")
@@ -1445,41 +1523,17 @@ def persistir_entregas(atualizacoes, obs_g=""):
     if not atualizacoes:
         return
     usuario = st.session_state.get("email_usuario")
-    itens = []
-    for row_id, nova_qtd, row_original in atualizacoes:
-        itens.append({
-            "id": int(row_id),
-            "quantidade_entregue": int(nova_qtd),
-            "quantidade_anterior": parse_numero(row_original.get("quantidade_entregue"), inteiro=True),
-            "material": str(row_original.get("material") or "").strip(),
-            "numero_pedido": str(row_original.get("numero_pedido") or ""),
-            "valor_unitario": float(row_original.get("valor_unitario") or 0),
-        })
-    try:
-        supabase.rpc("sispac_confirmar_itens", {
-            "p_itens": itens,
-            "p_usuario": usuario,
-            "p_obs": obs_g or "",
-        }).execute()
-    except Exception as erro:
-        if "SISPAC_CONFLITO" in str(erro):
-            raise RuntimeError(
-                "Outra pessoa já conferiu um destes itens. Atualize a página e salve de novo."
-            ) from erro
-        if not _rpc_ausente(erro):
-            raise
-        persistir_entregas_legado(atualizacoes, obs_g, usuario)
-    else:
-        atualizar_status_pedidos([str(item["numero_pedido"]) for item in itens])
-        registrar_auditoria(
-            "CONFERENCIA",
-            "pedidos",
-            f"{len(itens)} item(ns); {', '.join({item['numero_pedido'] for item in itens if item['numero_pedido']})}",
-        )
-        creditar_entregas_nas_ubs(atualizacoes, usuario)
+    persistir_entregas_legado(atualizacoes, obs_g, usuario, baixar_estoque=False, creditar_ubs=False)
+    numeros = [str(item[2].get("numero_pedido") or "") for item in atualizacoes]
+    marcar_pedidos_separados(numeros)
+    registrar_auditoria(
+        "SEPARACAO",
+        "pedidos",
+        f"{len(atualizacoes)} item(ns); {', '.join({n for n in numeros if n})}",
+    )
 
 
-def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None):
+def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None, baixar_estoque=False, creditar_ubs=False):
     numeros_afetados = []
     for row_id, nova_qtd, row_original in atualizacoes:
         qtd_ja_entregue = parse_numero(row_original.get("quantidade_entregue"), inteiro=True)
@@ -1500,16 +1554,108 @@ def persistir_entregas_legado(atualizacoes, obs_g="", usuario=None):
             raise RuntimeError(
                 "Outra pessoa já conferiu um destes itens. Atualize a página e salve de novo."
             )
-        aplicar_baixa_estoque_central(
-            str(row_original.get("material") or "").strip(),
-            delta_estoque,
-            usuario=usuario,
-            numero_pedido=str(row_original.get("numero_pedido") or ""),
-            observacao=obs_g,
-        )
+        if baixar_estoque:
+            aplicar_baixa_estoque_central(
+                str(row_original.get("material") or "").strip(),
+                delta_estoque,
+                usuario=usuario,
+                numero_pedido=str(row_original.get("numero_pedido") or ""),
+                observacao=obs_g,
+            )
         numeros_afetados.append(str(row_original.get("numero_pedido") or ""))
-    atualizar_status_pedidos(numeros_afetados)
-    creditar_entregas_nas_ubs(atualizacoes, usuario)
+    if creditar_ubs:
+        creditar_entregas_nas_ubs(atualizacoes, usuario)
+    return numeros_afetados
+
+
+def marcar_pedidos_separados(numeros):
+    for numero in {n for n in numeros if n}:
+        resposta = supabase.table("pedidos").select("id,quantidade_entregue").eq("numero_pedido", numero).execute()
+        linhas = resposta.data or []
+        if not linhas:
+            continue
+        if any(parse_numero(linha.get("quantidade_entregue"), inteiro=True) > 0 for linha in linhas):
+            aplicar_status_pedido(numero, STATUS_SEPARADO)
+
+
+def aplicar_status_pedido(numero, status):
+    supabase.table("pedidos").update({"status": status}).eq("numero_pedido", str(numero)).execute()
+
+
+def despachar_pedido(numero):
+    usuario = st.session_state.get("email_usuario")
+    resposta = supabase.table("pedidos").select("*").eq("numero_pedido", str(numero)).execute()
+    linhas = resposta.data or []
+    if not linhas:
+        raise RuntimeError("Pedido não encontrado.")
+    status = status_consolidado_pedido(pd.DataFrame(linhas))
+    if not pedido_separado(status):
+        raise RuntimeError("Só é possível despachar pedido já separado pelo almoxarifado.")
+    for linha in linhas:
+        qtd = parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+        if qtd <= 0:
+            continue
+        aplicar_baixa_estoque_central(
+            str(linha.get("material") or "").strip(),
+            qtd,
+            usuario=usuario,
+            numero_pedido=str(numero),
+            observacao="Saída para entrega / em trânsito",
+        )
+    aplicar_status_pedido(numero, STATUS_TRANSITO)
+    registrar_auditoria("DESPACHO", "pedidos", str(numero))
+
+
+def confirmar_recebimento_ubs(numero, recebidos_por_id=None):
+    usuario = st.session_state.get("email_usuario")
+    resposta = supabase.table("pedidos").select("*").eq("numero_pedido", str(numero)).execute()
+    linhas = resposta.data or []
+    if not linhas:
+        raise RuntimeError("Pedido não encontrado.")
+    status = status_consolidado_pedido(pd.DataFrame(linhas))
+    if not pedido_em_transito(status):
+        raise RuntimeError("Este pedido ainda não saiu para entrega.")
+    ubs_pedido = str(linhas[0].get("ubs") or "").strip().lower()
+    ubs_sessao = str(st.session_state.get("ubs_nome") or "").strip().lower()
+    if st.session_state.get("perfil") == "UBS" and ubs_pedido != ubs_sessao:
+        raise RuntimeError("Esta unidade só confirma o recebimento dos próprios pedidos.")
+    alguma_falta = False
+    atualizacoes_credito = []
+    for linha in linhas:
+        enviado = parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+        recebido = enviado
+        if recebidos_por_id is not None:
+            recebido = parse_numero(recebidos_por_id.get(linha.get("id"), enviado), inteiro=True)
+            recebido = max(0, min(enviado, recebido))
+        if recebido < enviado:
+            alguma_falta = True
+        dados = {"quantidade_recebida": recebido}
+        try:
+            supabase.table("pedidos").update(dados).eq("id", linha["id"]).execute()
+        except Exception:
+            pass
+        if recebido > 0:
+            atualizacoes_credito.append((linha["id"], recebido, {**linha, "quantidade_entregue": 0}))
+    if atualizacoes_credito:
+        creditar_entregas_nas_ubs(atualizacoes_credito, usuario)
+    pedida_ok = True
+    for linha in linhas:
+        pedida = parse_numero(linha.get("quantidade"), inteiro=True)
+        enviado = parse_numero(linha.get("quantidade_entregue"), inteiro=True)
+        recebido = enviado
+        if recebidos_por_id is not None:
+            recebido = parse_numero(recebidos_por_id.get(linha.get("id"), enviado), inteiro=True)
+        if recebido < pedida:
+            pedida_ok = False
+    if alguma_falta or not pedida_ok:
+        aplicar_status_pedido(numero, STATUS_ATENDIDO_PARCIAL)
+        if alguma_falta:
+            registrar_auditoria("RECEBIMENTO_DIVERGENCIA", "pedidos", str(numero))
+        else:
+            registrar_auditoria("RECEBIMENTO_UBS", "pedidos", str(numero))
+    else:
+        aplicar_status_pedido(numero, STATUS_ATENDIDO_INTEGRAL)
+        registrar_auditoria("RECEBIMENTO_UBS", "pedidos", str(numero))
 
 
 def atualizar_status_pedidos(numeros):
@@ -1596,7 +1742,7 @@ def creditar_entregas_nas_ubs(atualizacoes, usuario=None):
                 tipo=tipo,
                 usuario=usuario,
                 numero_pedido=str(row_original.get("numero_pedido") or ""),
-                observacao="Entrada pela conferência do almoxarifado",
+                observacao="Entrada pelo recebimento na UBS",
                 distrito=str(row_original.get("distrito") or "").strip(),
             )
         except Exception:
@@ -2846,26 +2992,44 @@ if secao_gestao in (None, "Painel gerencial"):
                             st.session_state.lista_tipo_pedidos = "Pendentes (conferência)"
                         elif st.session_state.get("lista_tipo_pedidos") == "Concluídos":
                             st.session_state.lista_tipo_pedidos = "Concluídos (visualizar / imprimir)"
-                        lista_tipo_atual = st.session_state.get("lista_tipo_pedidos") or "Pendentes (conferência)"
-                        so_pendentes = str(lista_tipo_atual).startswith("Pendentes")
+                        if st.session_state.perfil == "GESTAO":
+                            opcoes_lista_ped = [
+                                "Pendentes (conferência)",
+                                "Despacho e trânsito",
+                                "Concluídos (visualizar / imprimir)",
+                            ]
+                        else:
+                            opcoes_lista_ped = [
+                                "Pendentes (acompanhar / receber)",
+                                "Concluídos (visualizar / imprimir)",
+                            ]
+                        lista_tipo_atual = st.session_state.get("lista_tipo_pedidos") or opcoes_lista_ped[0]
+                        if lista_tipo_atual not in opcoes_lista_ped:
+                            lista_tipo_atual = opcoes_lista_ped[0]
+                            st.session_state.lista_tipo_pedidos = lista_tipo_atual
+                        tipo_lista = tipo_lista_pedidos(lista_tipo_atual, st.session_state.perfil)
+                        so_pendentes = tipo_lista == "pendentes"
+                        so_despacho = tipo_lista == "despacho"
                         pedido_selecionado = resolver_pedido_aberto(
-                            pedidos_unicos, so_pendentes, st.session_state.perfil
+                            pedidos_unicos, tipo_lista, st.session_state.perfil
                         )
 
                         if pedido_selecionado == "Selecione...":
                             lista_tipo = st.radio(
                                 "Lista",
-                                ["Pendentes (conferência)", "Concluídos (visualizar / imprimir)"],
+                                opcoes_lista_ped,
                                 horizontal=True,
                                 key="lista_tipo_pedidos",
                             )
-                            so_pendentes = lista_tipo.startswith("Pendentes")
+                            tipo_lista = tipo_lista_pedidos(lista_tipo, st.session_state.perfil)
+                            so_pendentes = tipo_lista == "pendentes"
+                            so_despacho = tipo_lista == "despacho"
                             if st.session_state.get("_lista_tipo_ant") != lista_tipo:
                                 st.session_state.pedido_aberto = None
                                 st.session_state.modo_abertura = None
                                 st.session_state.imprimir_ao_abrir = False
                                 st.session_state._lista_tipo_ant = lista_tipo
-                            filtro_status = "Pedido enviado" if so_pendentes else "Concluídos"
+                            filtro_status = tipo_lista
 
                             if st.session_state.perfil == "GESTAO":
                                 col_f_dist, col_f_ubs, col_f_agr = st.columns(3)
@@ -2894,13 +3058,12 @@ if secao_gestao in (None, "Painel gerencial"):
                                 filtro_ubs = "Todas"
                                 agrupamento = "Por pedido"
                                 if so_pendentes:
-                                    st.caption("Clique no pedido para conferir o que a unidade enviou. Não é possível alterar. O almoxarifado faz a conferência de entrega.")
+                                    st.caption("Acompanhe o pedido. Quando estiver em trânsito, confirme o recebimento. Só avise divergência se algum item separado não chegou.")
     
                             df_lista = pedidos_unicos.copy()
-                            if filtro_status == "Concluídos":
-                                df_lista = df_lista[df_lista["status"].map(pedido_concluido)]
-                            elif filtro_status != "Todos":
-                                df_lista = df_lista[df_lista["status"] == filtro_status]
+                            df_lista = df_lista[df_lista["status"].map(
+                                lambda s: pedido_pertence_lista(s, tipo_lista, st.session_state.perfil)
+                            )]
                             if filtro_distrito != "Todos":
                                 df_lista = df_lista[df_lista["distrito"] == filtro_distrito]
                             if filtro_ubs != "Todas":
@@ -2914,8 +3077,8 @@ if secao_gestao in (None, "Painel gerencial"):
     
                             if conferencia_por_material:
                                     st.markdown("#### Rateio por material (pedidos ainda não conferidos)")
-                                    st.caption("Informe a quantidade enviada a cada UBS. O estoque limita o total.")
-                                    pendentes = df_supabase[~df_supabase["status"].isin(["Atendido Parcialmente", "Atendido Integralmente"])].copy()
+                                    st.caption("Informe a quantidade que será separada para cada UBS. O estoque só baixa na saída para entrega.")
+                                    pendentes = df_supabase[df_supabase["status"].astype(str) == STATUS_PEDIDO_ENVIADO].copy()
                                     if filtro_distrito != "Todos":
                                         pendentes = pendentes[pendentes["distrito"] == filtro_distrito]
                                     if filtro_ubs != "Todas":
@@ -2927,12 +3090,14 @@ if secao_gestao in (None, "Painel gerencial"):
                                         saidas_conf = mapa_saidas_conferidas()
                                         saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
                                         mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
+                                        reservas_conf = mapa_reservas_separadas()
                                         estoque_atual = estoque_visivel(
                                             material_rateio,
                                             mapa_planilha_conf.get(material_rateio, 0),
                                             saidas_conf,
                                             saldos_lote_conf,
                                             materiais_lote_conf,
+                                            reservas=reservas_conf,
                                         )
                                         qtds_pedidas = [parse_numero(q, inteiro=True) for q in linhas_mat["quantidade"].tolist()]
                                         demanda_total = sum(qtds_pedidas)
@@ -2961,19 +3126,19 @@ if secao_gestao in (None, "Painel gerencial"):
                                                 )
                                                 novas_quantidades_entregues[row["id"] if "id" in row else idx] = val_entregue
                                             obs_gestao = st.text_input("Observação da Gestão (Opcional)", key=f"obs_rateio_{material_rateio}")
-                                            btn_salvar_rateio = st.form_submit_button("💾 Salvar rateio e baixar estoque")
+                                            btn_salvar_rateio = st.form_submit_button("Salvar rateio (separar)")
                                             if btn_salvar_rateio:
                                                 try:
                                                     soma_entrega = sum(novas_quantidades_entregues.values())
                                                     if soma_entrega > estoque_atual:
-                                                        st.error(f"A soma entregue ({soma_entrega}) ultrapassa o estoque ({estoque_atual}). Ajuste o rateio.")
+                                                        st.error(f"A soma separada ({soma_entrega}) ultrapassa o estoque ({estoque_atual}). Ajuste o rateio.")
                                                     else:
                                                         atualizacoes = []
                                                         for row_id, nova_qtd in novas_quantidades_entregues.items():
                                                             row_original = linhas_mat[linhas_mat["id"] == row_id].iloc[0] if "id" in linhas_mat.columns else linhas_mat.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
                                                             atualizacoes.append((row_id, nova_qtd, row_original))
                                                         persistir_entregas(atualizacoes, (obs_gestao or "").strip())
-                                                        st.success("Rateio salvo. Estoque baixado com o total entregue deste material.")
+                                                        st.success("Rateio salvo. O material foi separado; a baixa no estoque ocorre na saída para entrega.")
                                                         st.rerun()
                                                 except Exception as e:
                                                     st.error(f"Erro ao salvar rateio: {e}")
@@ -3007,16 +3172,25 @@ if secao_gestao in (None, "Painel gerencial"):
                                 else:
                                     if busca_pedido.strip() and len(df_lista) == 1:
                                         st.session_state.pedido_aberto = str(df_lista.iloc[0]["numero_pedido"])
-                                        st.session_state.modo_abertura = (
-                                            "conferir"
-                                            if so_pendentes and st.session_state.perfil == "GESTAO"
-                                            else "visualizar"
-                                        )
+                                        if so_pendentes and st.session_state.perfil == "GESTAO":
+                                            st.session_state.modo_abertura = "conferir"
+                                        elif so_despacho:
+                                            st.session_state.modo_abertura = "despachar"
+                                        else:
+                                            st.session_state.modo_abertura = "receber" if st.session_state.perfil == "UBS" else "visualizar"
                                         st.rerun()
+                                    if so_pendentes and st.session_state.perfil == "GESTAO":
+                                        acao_lista = "conferir"
+                                    elif so_despacho:
+                                        acao_lista = "despachar"
+                                    elif so_pendentes and st.session_state.perfil == "UBS":
+                                        acao_lista = "receber"
+                                    else:
+                                        acao_lista = "visualizar"
                                     render_lista_pedidos_clicavel(
                                         df_lista,
                                         "acomp",
-                                        acao="conferir" if so_pendentes and st.session_state.perfil == "GESTAO" else "visualizar",
+                                        acao=acao_lista,
                                     )
 
                         if pedido_selecionado != "Selecione...":
@@ -3029,25 +3203,30 @@ if secao_gestao in (None, "Painel gerencial"):
                             modo_abertura = st.session_state.get("modo_abertura") or (
                                 "conferir"
                                 if so_pendentes and st.session_state.perfil == "GESTAO"
-                                else "visualizar"
+                                else "despachar" if so_despacho else "visualizar"
                             )
 
                             if st.session_state.perfil != "GESTAO" and not pedido_concluido(status_atual):
-                                st.info("Pedido aguardando o almoxarifado. A unidade só consulta — não é possível alterar quantidades.")
+                                if pedido_em_transito(status_atual):
+                                    st.info("O material saiu do almoxarifado e está em trânsito. Confirme o recebimento abaixo.")
+                                elif pedido_separado(status_atual):
+                                    st.info("O almoxarifado já separou o que será enviado. Aguarde a saída para entrega.")
+                                else:
+                                    st.info("Pedido aguardando o almoxarifado. A unidade só consulta — não é possível alterar quantidades.")
 
-                            # Conferência só na lista de pendentes
                             if (
                                 st.session_state.perfil == "GESTAO"
                                 and modo_abertura == "conferir"
-                                and not pedido_concluido(status_atual)
+                                and str(status_atual) == STATUS_PEDIDO_ENVIADO
                             ):
                                 st.markdown("### Conferência do almoxarifado")
-                                st.caption("Informe a quantidade efetivamente enviada.")
+                                st.caption("Informe o que foi separado. O estoque só baixa quando o pedido sair para entrega.")
 
                                 saidas_conf = mapa_saidas_conferidas()
+                                reservas_conf = mapa_reservas_separadas()
                                 saldos_lote_conf, materiais_lote_conf = mapa_estoque_lotes()
                                 mapa_planilha_conf = mapa_estoque_planilha(df_materiais, col_material, col_estoque)
-                                ja_baixou_estoque = status_atual in {"Atendido Parcialmente", "Atendido Integralmente"}
+                                ja_baixou_estoque = str(status_atual) in STATUS_SAIU_CENTRAL
                                 
                                 with st.form(key=f"form_conferencia_{pedido_selecionado}"):
                                     novas_quantidades_entregues = {}
@@ -3062,6 +3241,7 @@ if secao_gestao in (None, "Painel gerencial"):
                                             saidas_conf,
                                             saldos_lote_conf,
                                             materiais_lote_conf,
+                                            reservas=reservas_conf,
                                         )
                                         teto_fisico = estoque_atual + (qtd_db_entregue if ja_baixou_estoque else 0)
                                         max_entregue = max(0, min(qtd_pedida, teto_fisico))
@@ -3097,7 +3277,7 @@ if secao_gestao in (None, "Painel gerencial"):
 
                                     obs_gestao = st.text_input("Observação da Gestão / Almoxarifado (Opcional)", value="", key=f"obs_g_{pedido_selecionado}")
                                     
-                                    btn_salvar_conf = st.form_submit_button("💾 Salvar Conferência e Atualizar Entregas")
+                                    btn_salvar_conf = st.form_submit_button("Salvar conferência (separar)")
                                     if btn_salvar_conf:
                                         try:
                                             atualizacoes = []
@@ -3105,12 +3285,48 @@ if secao_gestao in (None, "Painel gerencial"):
                                                 row_original = detalhes[detalhes['id'] == row_id].iloc[0] if 'id' in detalhes.columns else detalhes.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
                                                 atualizacoes.append((row_id, nova_qtd, row_original))
                                             persistir_entregas(atualizacoes, (obs_gestao or "").strip())
-                                            st.success("✅ Conferência salva. Estoque baixado com a quantidade entregue e centro de custos atualizado.")
+                                            st.success("Conferência salva. Pedido separado. A baixa no estoque acontece na saída para entrega.")
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Erro ao salvar conferência no Supabase: {e}")
                                 
                                 st.markdown("---")
+
+                            if st.session_state.perfil == "GESTAO" and pedido_separado(status_atual):
+                                st.markdown("### Saída para entrega")
+                                st.caption("Ao registrar a saída, o estoque central baixa e o pedido fica em trânsito até a UBS confirmar o recebimento.")
+                                if st.button("Registrar saída para entrega", type="primary", key=f"btn_despachar_{pedido_selecionado}"):
+                                    try:
+                                        despachar_pedido(pedido_selecionado)
+                                        st.success("Pedido em trânsito. Estoque central baixado. Aguardando confirmação da UBS.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(str(e))
+
+                            if st.session_state.perfil == "UBS" and pedido_em_transito(status_atual):
+                                st.markdown("### Confirmar recebimento")
+                                st.caption("Confirme se o que foi separado chegou. Só altere quantidade se algum item não chegou.")
+                                with st.form(key=f"form_recebimento_{pedido_selecionado}"):
+                                    recebidos = {}
+                                    for idx, row in detalhes.iterrows():
+                                        enviado = parse_numero(row.get("quantidade_entregue"), inteiro=True)
+                                        c1, c2 = st.columns([3, 1])
+                                        c1.write(f"**{row.get('material')}** — separado: {enviado}")
+                                        recebidos[row["id"]] = c2.number_input(
+                                            "Chegou",
+                                            min_value=0,
+                                            max_value=max(enviado, 0),
+                                            value=enviado,
+                                            key=f"rec_{row['id']}",
+                                            label_visibility="collapsed",
+                                        )
+                                    if st.form_submit_button("Confirmar recebimento", type="primary"):
+                                        try:
+                                            confirmar_recebimento_ubs(pedido_selecionado, recebidos)
+                                            st.success("Recebimento confirmado. O saldo da unidade foi atualizado.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(str(e))
 
                             if modo_abertura != "conferir":
                                 response_atu = supabase.table("pedidos").select("*").eq("numero_pedido", pedido_selecionado).execute()
@@ -3219,7 +3435,7 @@ if secao_gestao in (None, "Painel gerencial"):
                             df_cc = df_cc[df_cc['data_dt'].dt.year == agora.year]
 
                         if 'status' in df_cc.columns:
-                            df_cc = df_cc[df_cc['status'].isin(["Atendido Parcialmente", "Atendido Integralmente"])]
+                            df_cc = df_cc[df_cc['status'].isin(list(STATUS_SAIU_CENTRAL))]
                         else:
                             df_cc = df_cc[df_cc['quantidade_entregue'] > 0]
 
