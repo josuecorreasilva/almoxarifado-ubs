@@ -683,8 +683,50 @@ def pedido_pertence_lista(status, tipo_lista, perfil="GESTAO"):
 def abrir_pedido_lista(numero, modo, imprimir=False):
     st.session_state.pedido_aberto = numero
     st.session_state.modo_abertura = modo
-    st.session_state.imprimir_ao_abrir = imprimir
+    if imprimir:
+        pedir_impressao()
     st.rerun()
+
+
+def pedir_impressao():
+    st.session_state["_print_token"] = str(time.time_ns())
+
+
+def render_iframe_impressao():
+    token = str(st.session_state.get("_print_token") or "")
+    if not token:
+        return
+    components.html(
+        f"""
+<!DOCTYPE html>
+<html><body>
+<script>
+(function() {{
+  var token = {token!r};
+  var alvo = null;
+  try {{ alvo = window.parent; }} catch (e1) {{ alvo = null; }}
+  if (!alvo) {{
+    try {{ alvo = window.top; }} catch (e2) {{ alvo = window; }}
+  }}
+  try {{
+    alvo.__sispacPrinted = alvo.__sispacPrinted || {{}};
+    if (alvo.__sispacPrinted[token]) return;
+    alvo.__sispacPrinted[token] = 1;
+  }} catch (e3) {{}}
+  setTimeout(function() {{
+    try {{
+      alvo.focus();
+      alvo.print();
+    }} catch (e4) {{
+      try {{ window.top.print(); }} catch (e5) {{ window.print(); }}
+    }}
+  }}, 450);
+}})();
+</script>
+</body></html>
+""",
+        height=0,
+    )
 
 
 def html_linha_pedido(numero, ubs, status, data_txt):
@@ -3203,7 +3245,6 @@ if secao_gestao in (None, "Painel gerencial"):
                         elif st.session_state.get("_lista_tipo_ant") != lista_tipo:
                             st.session_state.pedido_aberto = None
                             st.session_state.modo_abertura = None
-                            st.session_state.imprimir_ao_abrir = False
                             if "busca_num_pedido_acomp" in st.session_state:
                                 st.session_state.busca_num_pedido_acomp = ""
                             st.session_state._lista_tipo_ant = lista_tipo
@@ -3549,9 +3590,7 @@ if secao_gestao in (None, "Painel gerencial"):
 
                                 html_pedido = montar_html_comprovante(detalhes, status_atual, sem_custo=sem_custo_print)
                                 st.markdown(textwrap.dedent(html_pedido).strip(), unsafe_allow_html=True)
-                                if st.session_state.get("imprimir_ao_abrir"):
-                                    st.session_state.imprimir_ao_abrir = False
-                                    st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+                                render_iframe_impressao()
 
                                 sufixo_via = "sem_valores" if sem_custo_print else "com_custos"
                                 nome_pdf = aplicar_sufixo_arquivo(
@@ -3592,7 +3631,9 @@ if secao_gestao in (None, "Painel gerencial"):
                                     )
                                 with c_imp:
                                     if st.button("Imprimir", key=f"print_comp_{pedido_selecionado}"):
-                                        st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+                                        pedir_impressao()
+                                        st.rerun()
+                                st.caption("Na janela de impressão, em Destino, escolha a impressora. Se aparecer só Salvar como PDF, abra a lista de destinos.")
 
                     elif sub_relatorio == "Centro de custos":
                         st.write("### Centro de custos")
@@ -3974,7 +4015,9 @@ if secao_gestao in (None, "Painel gerencial"):
                                 )
                             with c_imp_rel:
                                 if st.button("Imprimir", key="btn_print_rel_oficial"):
-                                    st.components.v1.html("""<script>window.parent.print();</script>""", height=0)
+                                    pedir_impressao()
+                                    st.rerun()
+                            render_iframe_impressao()
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
 
