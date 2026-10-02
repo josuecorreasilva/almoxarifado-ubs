@@ -7,6 +7,7 @@ import textwrap
 import unicodedata
 from datetime import datetime, date
 from contextlib import nullcontext
+from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
 try:
@@ -443,6 +444,33 @@ def achar_coluna(df, aliases):
     return None
 
 
+FUSO_SISPAC = ZoneInfo("America/Sao_Paulo")
+
+
+def agora_sispac():
+    return datetime.now(FUSO_SISPAC)
+
+
+def texto_agora_sispac():
+    return agora_sispac().strftime("%Y-%m-%d %H:%M:%S%z")
+
+
+def formatar_datahora_br(valor):
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    texto = str(valor).strip()
+    if not texto or texto.lower() in {"nat", "nan", "none"}:
+        return ""
+    try:
+        ts = pd.to_datetime(valor, utc=False)
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.tz_localize("UTC")
+        ts = ts.tz_convert(FUSO_SISPAC)
+        return ts.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return texto[:16]
+
+
 def parse_numero(valor, inteiro=False):
     padrao = 0 if inteiro else 0.0
     if valor is None or (isinstance(valor, float) and pd.isna(valor)):
@@ -570,9 +598,7 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
             )
         for i, row in df_lista.iterrows():
             numero = str(row["numero_pedido"])
-            data_txt = str(row.get("data") or "")
-            if len(data_txt) > 16:
-                data_txt = data_txt[:16]
+            data_txt = formatar_datahora_br(row.get("data"))
             ubs = str(row.get("ubs") or "")
             status = str(row.get("status") or "")
             pode_abrir_texto = True
@@ -665,18 +691,18 @@ def proximo_numero_pedido(ubs_nome):
                 proximo = seq + 1
     except Exception:
         proximo = 1
-    data_ref = datetime.now().strftime("%Y%m%d")
+    data_ref = agora_sispac().strftime("%Y%m%d")
     return f"PED-{proximo:04d}-{slug_arquivo(ubs_nome)}-{data_ref}"
 
 
 def nome_arquivo_pedido(numero_pedido, ubs_nome, data_ref=None, extensao="csv"):
     if data_ref is None:
-        data_fmt = datetime.now().strftime("%Y-%m-%d")
+            data_fmt = agora_sispac().strftime("%Y-%m-%d")
     else:
         try:
             data_fmt = pd.to_datetime(data_ref).strftime("%Y-%m-%d")
         except Exception:
-            data_fmt = datetime.now().strftime("%Y-%m-%d")
+            data_fmt = agora_sispac().strftime("%Y-%m-%d")
     return f"{slug_arquivo(numero_pedido)}_{slug_arquivo(ubs_nome)}_{data_fmt}.{extensao}"
 
 
@@ -943,7 +969,7 @@ def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer, extra
             "",
             f"Distrito / Unidade: {distrito} / {ubs}",
             f"Periodo abrangido: {periodo}",
-            f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"Data de emissao: {agora_sispac().strftime('%d/%m/%Y %H:%M')}",
         ]
         linhas.extend(str(item) for item in extra_cabecalho)
         linhas += ["", " | ".join(str(c) for c in df_print.columns)]
@@ -962,7 +988,7 @@ def gerar_pdf_relatorio(df_print, titulo, distrito, ubs, periodo, parecer, extra
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 6, texto_pdf(f"Distrito / Unidade: {distrito} / {ubs}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(0, 6, texto_pdf(f"Periodo abrangido: {periodo}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 6, texto_pdf(f"Data de emissao: {datetime.now().strftime('%d/%m/%Y %H:%M')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, texto_pdf(f"Data de emissao: {agora_sispac().strftime('%d/%m/%Y %H:%M')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     if extra_cabecalho:
         pdf.set_font("Helvetica", "B", 10)
         for item in extra_cabecalho:
@@ -1969,7 +1995,7 @@ def enviar_pdf_sispac(arquivo, pasta, nome_base):
     if len(conteudo) > 15 * 1024 * 1024:
         raise RuntimeError("O arquivo ultrapassa 15 MB. Envie um PDF ou imagem menor.")
     ext = extensao_arquivo(arquivo.name)
-    caminho = f"{pasta}/{slug_arquivo(nome_base)}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+    caminho = f"{pasta}/{slug_arquivo(nome_base)}_{agora_sispac().strftime('%Y%m%d%H%M%S')}.{ext}"
     supabase.storage.from_(BUCKET_DOCUMENTOS).upload(
         caminho,
         conteudo,
@@ -2879,7 +2905,7 @@ if secao_gestao in (None, "Novo pedido"):
                 st.error("❌ Erro crítico: A conexão com o Supabase não foi estabelecida.")
             else:
                 numero_pedido = proximo_numero_pedido(ubs_selecionada)
-                data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                data_pedido = texto_agora_sispac()
                 obs_limpa = observacao_geral.strip() if observacao_geral else ""
                 texto_observacao = obs_limpa if obs_limpa else "Sem observação"
                 with st.spinner("Salvando pedido no servidor..."):
@@ -3749,7 +3775,7 @@ if secao_gestao in (None, "Painel gerencial"):
                             nome_rel = nome_arquivo_pedido(
                                 f"Relatorio-{tipo_imp_oficial}",
                                 ubs_imp,
-                                datetime.now(),
+                                agora_sispac(),
                                 extensao="pdf",
                             )
                             nome_rel = aplicar_sufixo_arquivo(nome_rel, "sem_valores" if sem_custo_oficial else "com_custos")
@@ -3760,7 +3786,7 @@ if secao_gestao in (None, "Painel gerencial"):
                                 <h4 style="text-align: center; color: #555; margin-top: 5px; margin-bottom: 20px;">{html_seguro(titulo_rel_oficial)}{via_txt}</h4>
                                 <p><b>Distrito / Unidade:</b> {html_seguro(dist_imp_esc)} / {html_seguro(ubs_imp)}</p>
                                 <p><b>Período abrangido:</b> {html_seguro(periodo_imp)}</p>
-                                <p><b>Data de emissão:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                                <p><b>Data de emissão:</b> {agora_sispac().strftime('%d/%m/%Y %H:%M')}</p>
                                 {cabecalho_html_totais}
                                 <p><b>1. Relação consolidada (demanda vs despacho):</b></p>
                                 {tabela_html}
