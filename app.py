@@ -2305,11 +2305,17 @@ def html_linha_nota(numero, emissao, valor, pdf, cabecalho=False, selecionado=Fa
 
 def rotulo_empenho(linha):
     numero = str(linha.get("numero_empenho") or "").strip()
-    ano = linha.get("ano") or ""
+    ano = str(linha.get("ano") or "").strip()
+    if ano and (numero.endswith(f"/{ano}") or numero.endswith(f"-{ano}")):
+        texto = numero
+    elif ano:
+        texto = f"{numero}/{ano}"
+    else:
+        texto = numero
     fornecedor = str(linha.get("fornecedor") or "").strip()
     if fornecedor:
-        return f"{numero}/{ano} — {fornecedor}"
-    return f"{numero}/{ano}"
+        return f"{texto} — {fornecedor}"
+    return texto
 
 
 def abrir_empenho_lista(empenho_id):
@@ -2328,6 +2334,7 @@ def fechar_empenho_lista():
 
 def limpar_formulario_nota_fiscal():
     for chave in (
+        "sel_nf_empenho",
         "sel_empenho_nota",
         "nf_numero",
         "nf_serie",
@@ -2338,7 +2345,6 @@ def limpar_formulario_nota_fiscal():
         "pdf_nova_nota",
     ):
         st.session_state.pop(chave, None)
-    st.session_state.sel_empenho_nota = "Selecione..."
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
 
@@ -2434,12 +2440,17 @@ def render_painel_empenhos(usuario_atual):
             st.info("Cadastre um empenho ao lado para lançar as notas nele.")
         else:
             opcoes_emp = df_empenhos.to_dict("records")
-            rotulos = ["Selecione..."] + [rotulo_empenho(r) for r in opcoes_emp]
-            if st.session_state.get("sel_empenho_nota") not in rotulos:
-                st.session_state.sel_empenho_nota = "Selecione..."
-            escolha = st.selectbox("Empenho", rotulos, key="sel_empenho_nota")
-            if escolha == "Selecione...":
-                st.caption("Escolha o empenho para lançar uma nota. Depois do lançamento, este painel volta em branco.")
+            rotulos = [rotulo_empenho(r) for r in opcoes_emp]
+            escolha = st.selectbox(
+                "Empenho da nota",
+                rotulos,
+                index=None,
+                placeholder="Selecione o empenho desta nota",
+                key="sel_nf_empenho",
+                label_visibility="collapsed",
+            )
+            if not escolha:
+                st.caption("Selecione o empenho desta nota. Depois do lançamento, o campo volta vazio.")
             else:
                 empenho_nf = opcoes_emp[[rotulo_empenho(r) for r in opcoes_emp].index(escolha)]
                 with st.form("form_nova_nota", clear_on_submit=True):
