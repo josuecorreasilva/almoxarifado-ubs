@@ -120,7 +120,7 @@ st.markdown("""
         font-size: 11px;
         color: #666;
     }
-    .block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1400px; }
+    .block-container { padding-top: 0.7rem; padding-bottom: 1.1rem; max-width: 1400px; }
     [data-testid="stSidebar"] { background: #f4f7f8; }
     [data-testid="stHeader"] { background: transparent; }
     [data-testid="stSidebarNav"],
@@ -128,15 +128,64 @@ st.markdown("""
     [data-testid="stSidebarNavSeparator"] {
         display: none !important;
     }
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
+        gap: 0.42rem !important;
+    }
+    [data-testid="stHorizontalBlock"] {
+        gap: 0.5rem !important;
+    }
+    [data-testid="stElementContainer"] {
+        margin-bottom: 0 !important;
+    }
+    [data-testid="stWidgetLabel"] {
+        margin-bottom: 0.15rem !important;
+        font-size: 0.86rem !important;
+    }
+    [data-testid="stMarkdown"] h1,
+    [data-testid="stMarkdown"] h2,
+    [data-testid="stMarkdown"] h3,
+    [data-testid="stMarkdown"] h4,
+    [data-testid="stMarkdown"] h5 {
+        margin: 0.15rem 0 0.3rem 0 !important;
+        line-height: 1.25 !important;
+    }
+    [data-testid="stMarkdownContainer"] p {
+        margin: 0.15rem 0 0.35rem 0 !important;
+    }
+    [data-testid="stCaptionContainer"] {
+        margin-top: -0.15rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    div.stButton > button {
+        padding: 0.22rem 0.65rem !important;
+        min-height: 1.85rem !important;
+        font-size: 0.88rem !important;
+    }
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stSelectbox"] div[data-baseweb="select"] {
+        min-height: 1.85rem !important;
+        font-size: 0.88rem !important;
+    }
+    [data-testid="stTextArea"] textarea {
+        font-size: 0.88rem !important;
+    }
+    [data-testid="stForm"] {
+        padding: 0.55rem 0.7rem !important;
+        border-width: 1px !important;
+    }
+    hr {
+        margin: 0.35rem 0 !important;
+    }
     .sispac-header {
         background: linear-gradient(90deg, #0e4d56 0%, #1a6b75 100%);
         color: #fff;
-        border-radius: 10px;
-        padding: 14px 22px;
-        margin-bottom: 8px;
+        border-radius: 8px;
+        padding: 8px 16px;
+        margin-bottom: 4px;
     }
-    .sispac-header h1 { font-size: 1.35rem; margin: 0; font-weight: 650; color: #fff; }
-    .sispac-header p { margin: 4px 0 0 0; font-size: 0.88rem; opacity: 0.9; }
+    .sispac-header h1 { font-size: 1.2rem; margin: 0; font-weight: 650; color: #fff; }
+    .sispac-header p { margin: 2px 0 0 0; font-size: 0.82rem; opacity: 0.9; }
     .sispac-card {
         background: #f8fbfb;
         border: 1px solid #d5e4e6;
