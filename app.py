@@ -6,6 +6,7 @@ import re
 import textwrap
 import unicodedata
 from datetime import datetime, date
+from contextlib import nullcontext
 from supabase import create_client, Client
 
 try:
@@ -1725,24 +1726,48 @@ def _erro_tabela_ausente(erro):
     )) and any(nome in texto for nome in ("sispac_empenhos", "sispac_notas_fiscais", "notas_fiscais"))
 
 
+@st.cache_data(ttl=30)
+def _fetch_empenhos():
+    resposta = (
+        supabase.table("sispac_empenhos")
+        .select("*")
+        .order("data_empenho", desc=True)
+        .execute()
+    )
+    return resposta.data or []
+
+
+@st.cache_data(ttl=30)
+def _fetch_notas_resumo():
+    resposta = supabase.table("sispac_notas_fiscais").select("id,empenho_id,valor_nf").execute()
+    return resposta.data or []
+
+
+def limpar_cache_empenhos():
+    try:
+        _fetch_empenhos.clear()
+        _fetch_notas_resumo.clear()
+    except Exception:
+        pass
+
+
 def carregar_empenhos():
     try:
-        resposta = (
-            supabase.table("sispac_empenhos")
-            .select("*")
-            .order("data_empenho", desc=True)
-            .execute()
-        )
-        return pd.DataFrame(resposta.data or []), None
+        return pd.DataFrame(_fetch_empenhos()), None
     except Exception as e:
         return pd.DataFrame(), e
 
 
 def carregar_notas_empenho(empenho_id=None):
     try:
-        consulta = supabase.table("sispac_notas_fiscais").select("*").order("data_emissao", desc=True)
-        if empenho_id is not None:
-            consulta = consulta.eq("empenho_id", int(empenho_id))
+        if empenho_id is None:
+            return pd.DataFrame(_fetch_notas_resumo() or []), None
+        consulta = (
+            supabase.table("sispac_notas_fiscais")
+            .select("*")
+            .eq("empenho_id", int(empenho_id))
+            .order("data_emissao", desc=True)
+        )
         resposta = consulta.execute()
         return pd.DataFrame(resposta.data or []), None
     except Exception as e:
@@ -1803,6 +1828,7 @@ def gravar_pdf_registro(tabela, registro_id, caminho, nome):
         "pdf_caminho": caminho,
         "pdf_nome": nome,
     }).eq("id", int(registro_id)).execute()
+    limpar_cache_empenhos()
 
 
 def bloco_pdf_registro(rotulo, caminho, nome, chave_dl):
@@ -1811,25 +1837,10 @@ def bloco_pdf_registro(rotulo, caminho, nome, chave_dl):
         return
     nome_exibir = nome or "documento.pdf"
     url = url_documento_sispac(caminho)
-    c1, c2 = st.columns([1.4, 1.4])
-    with c1:
-        if url:
-            st.link_button(f"Abrir {rotulo}", url, use_container_width=True)
-        else:
-            st.caption("Link do arquivo indisponível.")
-    with c2:
-        try:
-            dados = supabase.storage.from_(BUCKET_DOCUMENTOS).download(caminho)
-            st.download_button(
-                f"Baixar {rotulo}",
-                data=dados,
-                file_name=nome_exibir,
-                mime=mime_arquivo(nome_exibir),
-                key=chave_dl,
-                use_container_width=True,
-            )
-        except Exception:
-            st.caption("Não foi possível baixar o arquivo agora.")
+    if url:
+        st.link_button(f"Abrir / baixar {rotulo} ({nome_exibir})", url, use_container_width=True)
+    else:
+        st.caption("Link do arquivo indisponível.")
 
 
 def html_linha_empenho(numero, fornecedor, valor, notas, pdf, data, cabecalho=False, selecionado=False):
@@ -1954,6 +1965,7 @@ def render_painel_empenhos(usuario_atual):
                         if novo_id:
                             st.session_state.empenho_aberto = int(novo_id)
                         registrar_auditoria("CADASTRO_EMPENHO", "sispac_empenhos", numero_limpo)
+                        limpar_cache_empenhos()
                         st.success(f"Empenho {numero_limpo} registrado.")
                         st.rerun()
                     except Exception as e:
@@ -2039,6 +2051,7 @@ def render_painel_empenhos(usuario_atual):
                                 "sispac_notas_fiscais",
                                 f"NF {numero_nf_limpo} no empenho {empenho_nf.get('numero_empenho')}",
                             )
+                            limpar_cache_empenhos()
                             st.success(f"Nota {numero_nf_limpo} lançada no empenho {empenho_nf.get('numero_empenho')}.")
                             st.rerun()
                         except Exception as e:
@@ -2453,17 +2466,60 @@ with col_titulo:
     )
 
 if st.session_state.perfil == "GESTAO":
-    aba1, aba2, aba3, aba4 = st.tabs(
-        ["Novo pedido", "Painel gerencial", "Cadastro e estoque", "Empenhos e notas"]
+    secao_gestao = st.radio(
+        "Seção",
+        ["Novo pedido", "Painel gerencial", "Cadastro e estoque", "Empenhos e notas"],
+        horizontal=True,
+        key="secao_gestao",
     )
+    aba1 = aba2 = aba3 = aba4 = None
     aba_estoque_ubs = None
 else:
     aba1, aba2, aba_estoque_ubs = st.tabs(["Novo pedido", "Acompanhar pedidos", "Estoque da unidade"])
     aba3 = None
     aba4 = None
+    secao_gestao = None
+
+ctx_pedido = aba1 if aba1 is not None else nullcontext()
+ctx_painel = aba2 if aba2 is not None else nullcontext()
+
+if secao_gestao != "Empenhos e notas":
+    try:
+        df_materiais = carregar_materiais(url_google_sheets_materiais)
+        col_categoria = achar_coluna(df_materiais, ["Categoria"])
+        col_material = achar_coluna(df_materiais, ["Material"])
+        col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
+        col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
+        df_materiais = mesclar_materiais_banco(df_materiais, col_categoria, col_material, col_estoque, col_preco)
+        if (df_materiais is None or df_materiais.empty) is False and not col_categoria:
+            col_categoria = achar_coluna(df_materiais, ["Categoria"])
+            col_material = achar_coluna(df_materiais, ["Material"])
+            col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
+            col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
+        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
+    except Exception as e:
+        df_materiais = mesclar_materiais_banco(pd.DataFrame(), "Categoria", "Material", "Estoque", "Valor Unitário")
+        col_categoria = achar_coluna(df_materiais, ["Categoria"]) if not df_materiais.empty else "Categoria"
+        col_material = achar_coluna(df_materiais, ["Material"]) if not df_materiais.empty else "Material"
+        col_estoque = achar_coluna(df_materiais, ["Estoque"]) if not df_materiais.empty else "Estoque"
+        col_preco = achar_coluna(df_materiais, ["Valor Unitário"]) if not df_materiais.empty else "Valor Unitário"
+        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
+        _erro_materiais = e
+    else:
+        _erro_materiais = None
+    saidas_conferidas = mapa_saidas_conferidas()
+    saldos_lote, materiais_com_lote = mapa_estoque_lotes()
+else:
+    df_materiais = pd.DataFrame()
+    col_categoria = col_material = col_estoque = col_preco = None
+    lista_categorias = []
+    saidas_conferidas = {}
+    saldos_lote, materiais_com_lote = {}, set()
+    _erro_materiais = None
 
 # --- ABA 1: FORMULÁRIO (Visão da UBS com Indicador de Estoque) ---
-with aba1:
+if secao_gestao in (None, "Novo pedido"):
+  with ctx_pedido:
     st.markdown("#### Requisição de materiais")
     if st.session_state.perfil == "GESTAO":
         st.caption("Selecione o distrito e a unidade, escolha a categoria e o material e inclua os itens antes de enviar a requisição.")
@@ -2525,31 +2581,8 @@ with aba1:
     if st.session_state.get("msg_pedido_ok"):
         st.success(st.session_state.msg_pedido_ok)
         st.session_state.msg_pedido_ok = None
-    
-    try:
-        df_materiais = carregar_materiais(url_google_sheets_materiais)
-        col_categoria = achar_coluna(df_materiais, ["Categoria"])
-        col_material = achar_coluna(df_materiais, ["Material"])
-        col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
-        col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
-        df_materiais = mesclar_materiais_banco(df_materiais, col_categoria, col_material, col_estoque, col_preco)
-        if (df_materiais is None or df_materiais.empty) is False and not col_categoria:
-            col_categoria = achar_coluna(df_materiais, ["Categoria"])
-            col_material = achar_coluna(df_materiais, ["Material"])
-            col_estoque = achar_coluna(df_materiais, ["Estoque", "Qtd", "Quantidade", "Estoque Atual"])
-            col_preco = achar_coluna(df_materiais, ["Valor Unitário", "Valor Unitario", "Preço", "Preco"])
-        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
-    except Exception as e:
-        st.error(f"Erro ao carregar materiais. Verifique o link do Google Sheets. ({e})")
-        df_materiais = mesclar_materiais_banco(pd.DataFrame(), "Categoria", "Material", "Estoque", "Valor Unitário")
-        col_categoria = achar_coluna(df_materiais, ["Categoria"]) if not df_materiais.empty else "Categoria"
-        col_material = achar_coluna(df_materiais, ["Material"]) if not df_materiais.empty else "Material"
-        col_estoque = achar_coluna(df_materiais, ["Estoque"]) if not df_materiais.empty else "Estoque"
-        col_preco = achar_coluna(df_materiais, ["Valor Unitário"]) if not df_materiais.empty else "Valor Unitário"
-        lista_categorias = df_materiais[col_categoria].dropna().unique().tolist() if col_categoria and not df_materiais.empty else ["Erro"]
-
-    saidas_conferidas = mapa_saidas_conferidas()
-    saldos_lote, materiais_com_lote = mapa_estoque_lotes()
+    if _erro_materiais is not None:
+        st.error(f"Erro ao carregar materiais. Verifique o link do Google Sheets. ({_erro_materiais})")
 
     opcoes_categoria = ["Selecione a categoria"] + [c for c in lista_categorias if c not in MATERIAIS_INVALIDOS]
     categoria_selecionada = st.selectbox("Categoria", opcoes_categoria, index=0, key="sel_categoria_pedido")
@@ -2698,7 +2731,8 @@ with aba1:
                         st.error(f"❌ Erro retornado pelo Banco de Dados: {e}")
 
 # --- ABA 2: PAINEL GERENCIAL E RELATÓRIOS OFICIAIS ---
-with aba2:
+if secao_gestao in (None, "Painel gerencial"):
+  with ctx_painel:
     if st.session_state.perfil == "GESTAO":
         st.markdown(
             "<div class='nao-imprimir'><h4>Painel de controle</h4>"
@@ -3521,8 +3555,8 @@ with aba2:
         except Exception as e:
             st.error(f"Erro ao carregar painel e relatórios: {e}")
 
-if aba3 is not None:
-    with aba3:
+if secao_gestao == "Cadastro e estoque":
+    with nullcontext():
         st.markdown("#### Cadastro, lotes e histórico")
         st.caption("Itens do banco somam-se à planilha. Entrada de lote baixa FIFO na conferência, com trava se duas pessoas salvarem ao mesmo tempo.")
         usuario_atual = st.session_state.get("email_usuario")
@@ -3750,9 +3784,8 @@ if aba3 is not None:
         st.caption("Saldo que chegou na UBS após a conferência. A unidade registra o consumo. Não mistura com o estoque central.")
         render_painel_estoque_ubs(modo_gestao=True)
 
-if aba4 is not None:
-    with aba4:
-        render_painel_empenhos(st.session_state.get("email_usuario"))
+if secao_gestao == "Empenhos e notas":
+    render_painel_empenhos(st.session_state.get("email_usuario"))
 
 if aba_estoque_ubs is not None:
     with aba_estoque_ubs:
