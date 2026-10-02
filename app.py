@@ -653,6 +653,22 @@ def tipo_lista_pedidos(rotulo, perfil):
     return "pendentes"
 
 
+def rotulo_lista_por_status(status, perfil, opcoes):
+    if perfil == "GESTAO":
+        if pedido_concluido(status):
+            tipo = "concluidos"
+        elif pedido_separado(status) or pedido_em_transito(status):
+            tipo = "despacho"
+        else:
+            tipo = "pendentes"
+    else:
+        tipo = "concluidos" if pedido_concluido(status) else "pendentes"
+    for opcao in opcoes:
+        if tipo_lista_pedidos(opcao, perfil) == tipo:
+            return opcao
+    return opcoes[0] if opcoes else "Pendentes (conferência)"
+
+
 def pedido_pertence_lista(status, tipo_lista, perfil="GESTAO"):
     status = str(status or STATUS_PEDIDO_ENVIADO)
     if tipo_lista == "concluidos":
@@ -683,11 +699,18 @@ def html_linha_pedido(numero, ubs, status, data_txt):
 
 def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
     if df_lista is None or df_lista.empty:
-        st.info("Nenhum pedido encontrado.")
+        if acao == "despachar":
+            st.info("Nenhum pedido em despacho ou trânsito. Depois da conferência, ele aparece nesta lista para imprimir e sair para entrega.")
+        elif acao == "conferir":
+            st.info("Nenhum pedido pendente de conferência.")
+        else:
+            st.info("Nenhum pedido encontrado.")
         return
     df_lista = df_lista.reset_index(drop=True)
     with st.container(key="lista_pedidos"):
-        cab, _espaco_cab = st.columns([8.5, 1.5]) if acao in {"conferir", "despachar", "receber"} else st.columns([7.4, 2.6])
+        cab, _espaco_cab = st.columns([7.4, 2.6]) if acao == "despachar" else (
+            st.columns([8.5, 1.5]) if acao in {"conferir", "receber"} else st.columns([7.4, 2.6])
+        )
         with cab:
             st.markdown(
                 "<div class='linha-pedido linha-pedido-cab'>"
@@ -703,7 +726,9 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
             ubs = str(row.get("ubs") or "")
             status = str(row.get("status") or "")
             pode_abrir_texto = True
-            if acao in {"conferir", "despachar", "receber"}:
+            if acao == "despachar":
+                c_txt, c_acao, c_imp = st.columns([7.4, 1.3, 1.3])
+            elif acao in {"conferir", "receber"}:
                 c_txt, c_acao = st.columns([8.5, 1.5])
             else:
                 c_txt, c_ver, c_imp = st.columns([7.4, 1.3, 1.3])
@@ -733,6 +758,10 @@ def render_lista_pedidos_clicavel(df_lista, chave, acao="visualizar"):
                     else:
                         if st.button("Ver", key=f"{chave}_ver_tr_{i}_{numero}"):
                             abrir_pedido_lista(numero, "visualizar")
+                with c_imp:
+                    if st.button("Imprimir", key=f"{chave}_imp_{i}_{numero}"):
+                        modo = "despachar" if pedido_separado(status) else "visualizar"
+                        abrir_pedido_lista(numero, modo, imprimir=True)
             elif acao == "receber":
                 with c_acao:
                     if pedido_em_transito(status):
@@ -3151,33 +3180,41 @@ if secao_gestao in (None, "Painel gerencial"):
                                 "Pendentes (acompanhar / receber)",
                                 "Concluídos (visualizar / imprimir)",
                             ]
+                        ir_lista = st.session_state.pop("_ir_lista_pedidos", None)
+                        if ir_lista in opcoes_lista_ped:
+                            st.session_state.lista_tipo_pedidos = ir_lista
+                            st.session_state._lista_tipo_ant = ir_lista
                         lista_tipo_atual = st.session_state.get("lista_tipo_pedidos") or opcoes_lista_ped[0]
                         if lista_tipo_atual not in opcoes_lista_ped:
                             lista_tipo_atual = opcoes_lista_ped[0]
                             st.session_state.lista_tipo_pedidos = lista_tipo_atual
-                        tipo_lista = tipo_lista_pedidos(lista_tipo_atual, st.session_state.perfil)
+
+                        lista_tipo = st.radio(
+                            "Lista",
+                            opcoes_lista_ped,
+                            horizontal=True,
+                            key="lista_tipo_pedidos",
+                        )
+                        tipo_lista = tipo_lista_pedidos(lista_tipo, st.session_state.perfil)
                         so_pendentes = tipo_lista == "pendentes"
                         so_despacho = tipo_lista == "despacho"
+                        if st.session_state.get("_lista_tipo_ant") is None:
+                            st.session_state._lista_tipo_ant = lista_tipo
+                        elif st.session_state.get("_lista_tipo_ant") != lista_tipo:
+                            st.session_state.pedido_aberto = None
+                            st.session_state.modo_abertura = None
+                            st.session_state.imprimir_ao_abrir = False
+                            if "busca_num_pedido_acomp" in st.session_state:
+                                st.session_state.busca_num_pedido_acomp = ""
+                            st.session_state._lista_tipo_ant = lista_tipo
                         pedido_selecionado = resolver_pedido_aberto(
                             pedidos_unicos, tipo_lista, st.session_state.perfil
                         )
 
                         if pedido_selecionado == "Selecione...":
-                            lista_tipo = st.radio(
-                                "Lista",
-                                opcoes_lista_ped,
-                                horizontal=True,
-                                key="lista_tipo_pedidos",
-                            )
-                            tipo_lista = tipo_lista_pedidos(lista_tipo, st.session_state.perfil)
-                            so_pendentes = tipo_lista == "pendentes"
-                            so_despacho = tipo_lista == "despacho"
-                            if st.session_state.get("_lista_tipo_ant") != lista_tipo:
-                                st.session_state.pedido_aberto = None
-                                st.session_state.modo_abertura = None
-                                st.session_state.imprimir_ao_abrir = False
-                                st.session_state._lista_tipo_ant = lista_tipo
                             filtro_status = tipo_lista
+                            if so_despacho and st.session_state.perfil == "GESTAO":
+                                st.caption("Aqui ficam os pedidos já conferidos. Imprima e depois registre a saída para entrega. O estoque só baixa nessa saída.")
 
                             if st.session_state.perfil == "GESTAO":
                                 col_f_dist, col_f_ubs, col_f_agr = st.columns(3)
@@ -3433,7 +3470,12 @@ if secao_gestao in (None, "Painel gerencial"):
                                                 row_original = detalhes[detalhes['id'] == row_id].iloc[0] if 'id' in detalhes.columns else detalhes.iloc[list(novas_quantidades_entregues.keys()).index(row_id)]
                                                 atualizacoes.append((row_id, nova_qtd, row_original))
                                             persistir_entregas(atualizacoes, (obs_gestao or "").strip())
-                                            st.success("Conferência salva. Pedido separado. A baixa no estoque acontece na saída para entrega.")
+                                            st.success("Conferência salva. Pedido separado. Imprima e registre a saída para entrega.")
+                                            st.session_state._ir_lista_pedidos = rotulo_lista_por_status(
+                                                STATUS_SEPARADO, st.session_state.perfil, opcoes_lista_ped
+                                            )
+                                            st.session_state.pedido_aberto = pedido_selecionado
+                                            st.session_state.modo_abertura = "despachar"
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Erro ao salvar conferência no Supabase: {e}")
@@ -3442,11 +3484,16 @@ if secao_gestao in (None, "Painel gerencial"):
 
                             if st.session_state.perfil == "GESTAO" and pedido_separado(status_atual):
                                 st.markdown("### Saída para entrega")
-                                st.caption("Ao registrar a saída, o estoque central baixa e o pedido fica em trânsito até a UBS confirmar o recebimento.")
+                                st.caption("Imprima o pedido e, em seguida, registre a saída. O estoque central baixa e o pedido fica em trânsito até a UBS confirmar.")
                                 if st.button("Registrar saída para entrega", type="primary", key=f"btn_despachar_{pedido_selecionado}"):
                                     try:
                                         despachar_pedido(pedido_selecionado)
                                         st.success("Pedido em trânsito. Estoque central baixado. Aguardando confirmação da UBS.")
+                                        st.session_state._ir_lista_pedidos = rotulo_lista_por_status(
+                                            STATUS_TRANSITO, st.session_state.perfil, opcoes_lista_ped
+                                        )
+                                        st.session_state.pedido_aberto = pedido_selecionado
+                                        st.session_state.modo_abertura = "visualizar"
                                         st.rerun()
                                     except Exception as e:
                                         st.error(str(e))
