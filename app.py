@@ -2320,6 +2320,7 @@ def rotulo_empenho(linha):
 
 def abrir_empenho_lista(empenho_id):
     st.session_state.empenho_aberto = int(empenho_id)
+    st.session_state.empenho_para_nota = int(empenho_id)
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
     st.rerun()
@@ -2347,6 +2348,7 @@ def limpar_formulario_nota_fiscal():
         st.session_state.pop(chave, None)
     st.session_state.nota_aberta = None
     st.session_state.mostrar_notas_empenho = False
+    st.session_state.pop("empenho_para_nota", None)
 
 
 def render_painel_empenhos(usuario_atual):
@@ -2413,6 +2415,7 @@ def render_painel_empenhos(usuario_atual):
                         novo_id = (resposta.data or [{}])[0].get("id")
                         if novo_id:
                             st.session_state.empenho_aberto = int(novo_id)
+                            st.session_state.empenho_para_nota = int(novo_id)
                         registrar_auditoria("CADASTRO_EMPENHO", "sispac_empenhos", numero_limpo)
                         limpar_cache_empenhos()
                         st.success(f"Empenho {numero_limpo} registrado.")
@@ -2434,13 +2437,20 @@ def render_painel_empenhos(usuario_atual):
 
     with col_nf:
         st.markdown("<h5 style='margin:0.15rem 0 0.3rem 0;'>Nota fiscal do empenho</h5>", unsafe_allow_html=True)
+        st.caption("O empenho já cadastrado aparece na lista. Selecione-o aqui (ou clique na linha embaixo) para lançar a nota. Depois do lançamento, este lado volta vazio para a próxima NF.")
         if st.session_state.pop("_limpar_form_nf", False):
             limpar_formulario_nota_fiscal()
         if df_empenhos.empty:
-            st.info("Cadastre um empenho ao lado para lançar as notas nele.")
+            st.info("Cadastre um empenho ao lado. Em seguida este painel libera o lançamento das notas.")
         else:
             opcoes_emp = df_empenhos.to_dict("records")
             rotulos = [rotulo_empenho(r) for r in opcoes_emp]
+            alvo_nota = st.session_state.pop("empenho_para_nota", None)
+            if alvo_nota:
+                for registro in opcoes_emp:
+                    if int(registro["id"]) == int(alvo_nota):
+                        st.session_state.sel_nf_empenho = rotulo_empenho(registro)
+                        break
             escolha = st.selectbox(
                 "Empenho da nota",
                 rotulos,
