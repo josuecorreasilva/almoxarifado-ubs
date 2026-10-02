@@ -394,6 +394,20 @@ st.markdown("""
         height: 100% !important;
         z-index: 6 !important;
     }
+    .st-key-lista_empenhos [class*="st-key-hit_emp_"] div.stButton > button,
+    .st-key-lista_notas_emp [class*="st-key-hit_nf_"] div.stButton > button,
+    .st-key-lista_empenhos [class*="st-key-hit_emp_"] button,
+    .st-key-lista_notas_emp [class*="st-key-hit_nf_"] button {
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 36px !important;
+        opacity: 0 !important;
+        cursor: pointer !important;
+        border: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        color: transparent !important;
+    }
     .st-key-lista_empenhos [class*="st-key-open_emp_"],
     .st-key-lista_notas_emp [class*="st-key-open_nf_"] {
         position: absolute !important;
@@ -2561,7 +2575,7 @@ def render_painel_empenhos(usuario_atual):
                         abrir_empenho_lista(emp_id)
 
     if not aberto_id:
-        st.info("Clique no texto de um empenho para abrir o documento.")
+        st.caption("Clique no texto da linha ou em Abrir para ver o empenho.")
         return
 
     empenho_ver = next((r for r in df_lista.to_dict("records") if int(r["id"]) == int(aberto_id)), None)
