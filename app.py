@@ -2326,9 +2326,21 @@ def fechar_empenho_lista():
     st.rerun()
 
 
-def abrir_nota_lista(nota_id):
-    st.session_state.nota_aberta = int(nota_id)
-    st.rerun()
+def limpar_formulario_nota_fiscal():
+    for chave in (
+        "sel_empenho_nota",
+        "nf_numero",
+        "nf_serie",
+        "data_emissao_nf",
+        "valor_nota_txt",
+        "nf_chave",
+        "nf_obs",
+        "pdf_nova_nota",
+    ):
+        st.session_state.pop(chave, None)
+    st.session_state.sel_empenho_nota = "Selecione..."
+    st.session_state.nota_aberta = None
+    st.session_state.mostrar_notas_empenho = False
 
 
 def render_painel_empenhos(usuario_atual):
@@ -2416,89 +2428,89 @@ def render_painel_empenhos(usuario_atual):
 
     with col_nf:
         st.markdown("<h5 style='margin:0.15rem 0 0.3rem 0;'>Nota fiscal do empenho</h5>", unsafe_allow_html=True)
+        if st.session_state.pop("_limpar_form_nf", False):
+            limpar_formulario_nota_fiscal()
         if df_empenhos.empty:
             st.info("Cadastre um empenho ao lado para lançar as notas nele.")
         else:
             opcoes_emp = df_empenhos.to_dict("records")
-            rotulos = [rotulo_empenho(r) for r in opcoes_emp]
-            ids_emp = [int(r["id"]) for r in opcoes_emp]
-            idx_padrao = 0
-            aberto = st.session_state.get("empenho_aberto")
-            if aberto in ids_emp:
-                idx_padrao = ids_emp.index(aberto)
-            escolha = st.selectbox("Empenho", rotulos, index=idx_padrao, key="sel_empenho_nota")
-            empenho_nf = opcoes_emp[rotulos.index(escolha)]
-            with st.form("form_nova_nota"):
-                numero_nf = st.text_input("Número da nota fiscal")
-                c_ser, c_dt = st.columns(2)
-                with c_ser:
-                    serie_nf = st.text_input("Série (opcional)")
-                with c_dt:
-                    data_nf = campo_data_br("Data de emissão", chave="data_emissao_nf")
-                valor_nf = campo_valor_reais("Valor da nota (R$)", chave="valor_nota_txt")
-                chave_nf = st.text_input("Chave de acesso (opcional)")
-                obs_nf = st.text_input("Observação da nota (opcional)")
-                pdf_nf = st.file_uploader(
-                    "PDF da nota fiscal digitalizada",
-                    type=TIPOS_PDF_EMPENHO,
-                    key="pdf_nova_nota",
-                )
-                if st.form_submit_button("Lançar nota no empenho"):
-                    numero_nf_limpo = str(numero_nf or "").strip()
-                    if not numero_nf_limpo:
-                        st.error("Informe o número da nota fiscal.")
-                    else:
-                        pdf_caminho = None
-                        pdf_nome = None
-                        try:
-                            pdf_caminho, pdf_nome = enviar_pdf_sispac(
-                                pdf_nf,
-                                f"notas/{empenho_nf.get('numero_empenho')}",
-                                numero_nf_limpo,
-                            )
-                        except Exception as e:
-                            st.warning(f"A nota será salva, mas o PDF não entrou: {e}")
-                        dados_nf = {
-                            "empenho_id": int(empenho_nf["id"]),
-                            "numero_nf": numero_nf_limpo,
-                            "serie": str(serie_nf or "").strip(),
-                            "data_emissao": data_nf.strftime("%Y-%m-%d"),
-                            "valor_nf": float(valor_nf or 0),
-                            "chave_acesso": str(chave_nf or "").strip(),
-                            "observacao": str(obs_nf or "").strip(),
-                            "criado_por": usuario_atual,
-                        }
-                        if pdf_caminho:
-                            dados_nf["pdf_caminho"] = pdf_caminho
-                            dados_nf["pdf_nome"] = pdf_nome
-                        try:
-                            resposta = supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
-                            nova_id = (resposta.data or [{}])[0].get("id")
-                            st.session_state.empenho_aberto = int(empenho_nf["id"])
-                            st.session_state.mostrar_notas_empenho = False
-                            st.session_state.nota_aberta = None
-                            registrar_auditoria(
-                                "CADASTRO_NF",
-                                "sispac_notas_fiscais",
-                                f"NF {numero_nf_limpo} no empenho {empenho_nf.get('numero_empenho')}",
-                            )
-                            limpar_cache_empenhos()
-                            st.success(f"Nota {numero_nf_limpo} lançada no empenho {empenho_nf.get('numero_empenho')}.")
-                            st.rerun()
-                        except Exception as e:
-                            if "duplicate" in str(e).lower() or "23505" in str(e):
-                                st.error("Esta nota (número e série) já está lançada neste empenho.")
-                            elif "pdf_caminho" in str(e).lower():
-                                try:
-                                    dados_nf.pop("pdf_caminho", None)
-                                    dados_nf.pop("pdf_nome", None)
-                                    supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
-                                    st.warning("Nota salva. Rode de novo o SQL `sispac_empenhos.sql` para gravar o PDF.")
-                                    st.rerun()
-                                except Exception as e2:
-                                    st.error(f"Não foi possível lançar a nota: {e2}")
-                            else:
-                                st.error(f"Não foi possível lançar a nota: {e}")
+            rotulos = ["Selecione..."] + [rotulo_empenho(r) for r in opcoes_emp]
+            if st.session_state.get("sel_empenho_nota") not in rotulos:
+                st.session_state.sel_empenho_nota = "Selecione..."
+            escolha = st.selectbox("Empenho", rotulos, key="sel_empenho_nota")
+            if escolha == "Selecione...":
+                st.caption("Escolha o empenho para lançar uma nota. Depois do lançamento, este painel volta em branco.")
+            else:
+                empenho_nf = opcoes_emp[[rotulo_empenho(r) for r in opcoes_emp].index(escolha)]
+                with st.form("form_nova_nota", clear_on_submit=True):
+                    numero_nf = st.text_input("Número da nota fiscal", key="nf_numero")
+                    c_ser, c_dt = st.columns(2)
+                    with c_ser:
+                        serie_nf = st.text_input("Série (opcional)", key="nf_serie")
+                    with c_dt:
+                        data_nf = campo_data_br("Data de emissão", chave="data_emissao_nf")
+                    valor_nf = campo_valor_reais("Valor da nota (R$)", chave="valor_nota_txt")
+                    chave_nf = st.text_input("Chave de acesso (opcional)", key="nf_chave")
+                    obs_nf = st.text_input("Observação da nota (opcional)", key="nf_obs")
+                    pdf_nf = st.file_uploader(
+                        "PDF da nota fiscal digitalizada",
+                        type=TIPOS_PDF_EMPENHO,
+                        key="pdf_nova_nota",
+                    )
+                    if st.form_submit_button("Lançar nota no empenho"):
+                        numero_nf_limpo = str(numero_nf or "").strip()
+                        if not numero_nf_limpo:
+                            st.error("Informe o número da nota fiscal.")
+                        else:
+                            pdf_caminho = None
+                            pdf_nome = None
+                            try:
+                                pdf_caminho, pdf_nome = enviar_pdf_sispac(
+                                    pdf_nf,
+                                    f"notas/{empenho_nf.get('numero_empenho')}",
+                                    numero_nf_limpo,
+                                )
+                            except Exception as e:
+                                st.warning(f"A nota será salva, mas o PDF não entrou: {e}")
+                            dados_nf = {
+                                "empenho_id": int(empenho_nf["id"]),
+                                "numero_nf": numero_nf_limpo,
+                                "serie": str(serie_nf or "").strip(),
+                                "data_emissao": data_nf.strftime("%Y-%m-%d"),
+                                "valor_nf": float(valor_nf or 0),
+                                "chave_acesso": str(chave_nf or "").strip(),
+                                "observacao": str(obs_nf or "").strip(),
+                                "criado_por": usuario_atual,
+                            }
+                            if pdf_caminho:
+                                dados_nf["pdf_caminho"] = pdf_caminho
+                                dados_nf["pdf_nome"] = pdf_nome
+                            try:
+                                supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
+                                registrar_auditoria(
+                                    "CADASTRO_NF",
+                                    "sispac_notas_fiscais",
+                                    f"NF {numero_nf_limpo} no empenho {empenho_nf.get('numero_empenho')}",
+                                )
+                                limpar_cache_empenhos()
+                                st.session_state._limpar_form_nf = True
+                                st.success(f"Nota {numero_nf_limpo} lançada no empenho {empenho_nf.get('numero_empenho')}.")
+                                st.rerun()
+                            except Exception as e:
+                                if "duplicate" in str(e).lower() or "23505" in str(e):
+                                    st.error("Esta nota (número e série) já está lançada neste empenho.")
+                                elif "pdf_caminho" in str(e).lower():
+                                    try:
+                                        dados_nf.pop("pdf_caminho", None)
+                                        dados_nf.pop("pdf_nome", None)
+                                        supabase.table("sispac_notas_fiscais").insert(dados_nf).execute()
+                                        st.session_state._limpar_form_nf = True
+                                        st.warning("Nota salva. Rode de novo o SQL `sispac_empenhos.sql` para gravar o PDF.")
+                                        st.rerun()
+                                    except Exception as e2:
+                                        st.error(f"Não foi possível lançar a nota: {e2}")
+                                else:
+                                    st.error(f"Não foi possível lançar a nota: {e}")
 
     st.markdown("---")
     st.markdown("##### Empenhos registrados")
